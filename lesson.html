@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terraform for CloudFormation Experts: AWS Instance Scheduler</title>
+    <style>
+        :root {
+            --primary-color: #5a46c0;
+            --secondary-color: #0d97ce;
+            --background-color: #f5f7fa;
+            --text-color: #333;
+            --code-background: #f3f3f3;
+            --border-color: #ddd;
+            --highlight-color: #ffeb3b;
+            --section-bg: rgba(90, 70, 192, 0.05);
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background-color);
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        h2 {
+            color: var(--primary-color);
+            margin: 2rem 0 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--primary-color);
+        }
+        
+        h3 {
+            color: var(--secondary-color);
+            margin: 1.5rem 0 1rem;
+        }
+        
+        p {
+            margin-bottom: 1rem;
+        }
+        
+        pre {
+            background-color: var(--code-background);
+            padding: 1rem;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 1rem 0;
+            border-left: 4px solid var(--secondary-color);
+        }
+        
+        code {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: var(--code-background);
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.9rem;
+        }
+        
+        pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        
+        ul, ol {
+            margin: 1rem 0 1rem 2rem;
+        }
+        
+        li {
+            margin-bottom: 0.5rem;
+        }
+        
+        .module {
+            background-color: var(--section-bg);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        
+        .lesson {
+            background-color: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        
+        .exercise {
+            background-color: rgba(13, 151, 206, 0.1);
+            border-left: 4px solid var(--secondary-color);
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .exercise h4 {
+            color: var(--secondary-color);
+            margin-bottom: 0.5rem;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+        
+        th, td {
+            border: 1px solid var(--border-color);
+            padding: 0.75rem;
+            text-align: left;
+        }
+        
+        th {
+            background-color: var(--primary-color);
+            color: white;
+        }
+        
+        tr:nth-child(even) {
+            background-color: rgba(0, 0, 0, 0.02);
+        }
+        
+        .note {
+            background-color: rgba(255, 235, 59, 0.3);
+            border-left: 4px solid var(--highlight-color);
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .toc {
+            background-color: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        
+        .toc h2 {
+            margin-top: 0;
+        }
+        
+        .toc ul {
+            list-style-type: none;
+            margin-left: 0;
+        }
+        
+        .toc ul ul {
+            margin-left: 1.5rem;
+        }
+        
+        .toc li {
+            margin-bottom: 0.25rem;
+        }
+        
+        .toc a {
+            color: var(--secondary-color);
+            text-decoration: none;
+        }
+        
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        
+        footer {
+            text-align: center;
+            margin-top: 4rem;
+            padding: 2rem 0;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            header {
+                padding: 1.5rem;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .module, .lesson {
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Terraform for CloudFormation Experts</h1>
+        <p>Understanding the AWS Instance Scheduler Implementation</p>
+    </header>
+    
+    <div class="toc">
+        <h2>Table of Contents</h2>
+        <ul>
+            <li><a href="#overview">Course Overview</a></li>
+            <li>
+                <a href="#module1">Module 1: Terraform Fundamentals for CloudFormation Users</a>
+                <ul>
+                    <li><a href="#lesson1-1">Comparing Terraform and CloudFormation</a></li>
+                    <li><a href="#lesson1-2">Terraform File Structure</a></li>
+                </ul>
+            </li>
+            <li>
+                <a href="#module2">Module 2: Variables, Locals, and Outputs</a>
+                <ul>
+                    <li><a href="#lesson2-1">Variables in Terraform</a></li>
+                    <li><a href="#lesson2-2">Local Values (locals)</a></li>
+                    <li><a href="#lesson2-3">Outputs</a></li>
+                </ul>
+            </li>
+            <li>
+                <a href="#module3">Module 3: Resources and Data Sources</a>
+                <ul>
+                    <li><a href="#lesson3-1">Resource Blocks</a></li>
+                    <li><a href="#lesson3-2">Data Sources</a></li>
+                </ul>
+            </li>
+            <li>
+                <a href="#module4">Module 4: Understanding Modules</a>
+                <ul>
+                    <li><a href="#lesson4-1">Module Basics</a></li>
+                    <li><a href="#lesson4-2">Module Inputs and Outputs</a></li>
+                    <li><a href="#lesson4-3">Module Organization in the Instance Scheduler</a></li>
+                </ul>
+            </li>
+            <li>
+                <a href="#module5">Module 5: Functions and Expressions</a>
+                <ul>
+                    <li><a href="#lesson5-1">Terraform Functions</a></li>
+                    <li><a href="#lesson5-2">Dynamic Blocks</a></li>
+                    <li><a href="#lesson5-3">Template Files</a></li>
+                </ul>
+            </li>
+            <li>
+                <a href="#module6">Module 6: State Management and Deployment</a>
+                <ul>
+                    <li><a href="#lesson6-1">Understanding Terraform State</a></li>
+                    <li><a href="#lesson6-2">Deployment Workflow</a></li>
+                </ul>
+            </li>
+            <li>
+                <a href="#module7">Module 7: Making Modifications</a>
+                <ul>
+                    <li><a href="#lesson7-1">Adding New Resources</a></li>
+                    <li><a href="#lesson7-2">Modifying Existing Resources</a></li>
+                    <li><a href="#lesson7-3">Advanced Customization</a></li>
+                </ul>
+            </li>
+            <li>
+                <a href="#module8">Module 8: Debugging and Troubleshooting</a>
+                <ul>
+                    <li><a href="#lesson8-1">Common Issues and Solutions</a></li>
+                    <li><a href="#lesson8-2">Debugging Techniques</a></li>
+                </ul>
+            </li>
+            <li><a href="#finalproject">Final Project: Extending the Instance Scheduler</a></li>
+            <li><a href="#appendix1">Appendix: Terraform CLI Reference</a></li>
+            <li><a href="#appendix2">Appendix: Terraform vs CloudFormation Terminology</a></li>
+        </ul>
+    </div>
+    
+    <section id="overview">
+        <h2>Course Overview: From CloudFormation to Terraform</h2>
+        <p>This course will guide you through understanding the Terraform implementation of AWS Instance Scheduler. By the end, you'll be comfortable navigating, understanding, and modifying the codebase.</p>
+    </section>
+    
+    <section id="module1" class="module">
+        <h2>Module 1: Terraform Fundamentals for CloudFormation Users</h2>
+        
+        <div id="lesson1-1" class="lesson">
+            <h3>Lesson 1: Comparing Terraform and CloudFormation</h3>
+            
+            <h4>Key Concepts:</h4>
+            <ul>
+                <li><strong>Declarative Syntax</strong>: Both use declarative configuration (what, not how)</li>
+                <li><strong>State Management</strong>: 
+                    <ul>
+                        <li>CloudFormation manages state in AWS</li>
+                        <li>Terraform keeps a state file you must maintain</li>
+                    </ul>
+                </li>
+                <li><strong>Resource Graph</strong>: 
+                    <ul>
+                        <li>Terraform builds a dependency graph to determine deployment order</li>
+                        <li>CloudFormation uses DependsOn and implicit references</li>
+                    </ul>
+                </li>
+                <li><strong>Provider Model</strong>: 
+                    <ul>
+                        <li>Terraform supports multiple cloud providers</li>
+                        <li>CloudFormation is AWS-specific</li>
+                    </ul>
+                </li>
+            </ul>
+            
+            <h4>Example Comparison:</h4>
+            
+            <p>CloudFormation:</p>
+            <pre><code>Resources:
+  MyBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: my-example-bucket</code></pre>
+            
+            <p>Terraform:</p>
+            <pre><code>resource "aws_s3_bucket" "my_bucket" {
+  bucket = "my-example-bucket"
+}</code></pre>
+        </div>
+        
+        <div id="lesson1-2" class="lesson">
+            <h3>Lesson 2: Terraform File Structure</h3>
+            
+            <h4>Key Files in Terraform Projects:</h4>
+            <ol>
+                <li><code>*.tf</code> files - Main configuration files</li>
+                <li><code>terraform.tfstate</code> - State file (never edit manually!)</li>
+                <li><code>terraform.tfvars</code> - Variable values</li>
+                <li><code>.terraform/</code> - Local plugins and modules</li>
+            </ol>
+            
+            <h4>Instance Scheduler Structure:</h4>
+            <ul>
+                <li>Core files: <code>main.tf</code>, <code>variables.tf</code>, <code>outputs.tf</code>, <code>locals.tf</code>, <code>versions.tf</code>, <code>data.tf</code></li>
+                <li>Module directories: <code>modules/*/</code></li>
+                <li>Templates: <code>templates/*.tpl</code></li>
+            </ul>
+            
+            <div class="exercise">
+                <h4>Practical Exercise:</h4>
+                <p>Navigate the Instance Scheduler structure and identify the purpose of each file. Create a diagram showing the relationships between the main configuration files and modules.</p>
+            </div>
+        </div>
+    </section>
+    
+    <section id="module2" class="module">
+        <h2>Module 2: Variables, Locals, and Outputs</h2>
+        
+        <div id="lesson2-1" class="lesson">
+            <h3>Lesson 1: Variables in Terraform</h3>
+            
+            <h4>Variable Definition (from <code>variables.tf</code>):</h4>
+            <pre><code>variable "tag_name" {
+  type        = string
+  default     = "Schedule"
+  description = "The tag key Instance Scheduler will read to determine the schedule for a resource."
+  validation {
+    condition     = length(var.tag_name) >= 1 && length(var.tag_name) <= 127
+    error_message = "The tag name must be between 1 and 127 characters long."
+  }
+}</code></pre>
+            
+            <h4>CloudFormation Equivalent:</h4>
+            <pre><code>Parameters:
+  TagName:
+    Type: String
+    Default: Schedule
+    Description: The tag key Instance Scheduler will read to determine the schedule.
+    MinLength: 1
+    MaxLength: 127</code></pre>
+            
+            <h4>Key Differences:</h4>
+            <ul>
+                <li>Terraform supports validation directly in variable definition</li>
+                <li>Variable names use snake_case, not CamelCase</li>
+                <li>Types are simpler (string, number, bool, list, map, object)</li>
+            </ul>
+        </div>
+        
+        <div id="lesson2-2" class="lesson">
+            <h3>Lesson 2: Local Values (locals)</h3>
+            
+            <h4>Local Values (from <code>locals.tf</code>):</h4>
+            <pre><code>locals {
+  solution_id      = "SO0030"
+  schedule_ec2_condition = var.schedule_ec2 == "Enabled"
+  
+  cron_expressions_map = {
+    "1"  = "cron(0/1 * * * ? *)"
+    "2"  = "cron(0/2 * * * ? *)"
+    # ...more values...
+  }
+  
+  scheduler_cron_expression = local.cron_expressions_map[local.scheduler_frequency_str]
+}</code></pre>
+            
+            <h4>CloudFormation Equivalent:</h4>
+            <ul>
+                <li>Mappings for lookup tables</li>
+                <li>Conditions for conditional values</li>
+            </ul>
+            
+            <h4>Key Differences:</h4>
+            <ul>
+                <li>Locals can reference other variables and locals</li>
+                <li>Expressions can be more complex</li>
+                <li>No separate "Conditions" section - conditions are expressions</li>
+            </ul>
+        </div>
+        
+        <div id="lesson2-3" class="lesson">
+            <h3>Lesson 3: Outputs</h3>
+            
+            <h4>Terraform Outputs (from <code>outputs.tf</code>):</h4>
+            <pre><code>output "scheduler_role_arn" {
+  description = "Scheduler role ARN"
+  value       = module.iam.scheduler_role_arn
+}</code></pre>
+            
+            <h4>CloudFormation Equivalent:</h4>
+            <pre><code>Outputs:
+  SchedulerRoleArn:
+    Description: Scheduler role ARN
+    Value: !GetAtt SchedulerRole.Arn</code></pre>
+            
+            <div class="exercise">
+                <h4>Practical Exercise:</h4>
+                <p>Add a new variable with validation to control Lambda timeout values. The timeout should be between 60 and 900 seconds. Then reference this variable in the Lambda module.</p>
+            </div>
+        </div>
+    </section>
+    
+    <section id="module3" class="module">
+        <h2>Module 3: Resources and Data Sources</h2>
+        
+        <div id="lesson3-1" class="lesson">
+            <h3>Lesson 1: Resource Blocks</h3>
+            
+            <h4>Resource Definition:</h4>
+            <pre><code>resource "aws_iam_role" "scheduler_role" {
+  name = "${var.namespace}-Scheduler-Role"
+  
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.scheduling_request_handler_role.arn
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}</code></pre>
+            
+            <h4>CloudFormation Equivalent:</h4>
+            <pre><code>Resources:
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Namespace}-Scheduler-Role"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              AWS: !GetAtt SchedulingRequestHandlerRole.Arn
+      Tags:
+        - !Ref Tags</code></pre>
+            
+            <h4>Key Differences:</h4>
+            <ul>
+                <li>Resource IDs use snake_case</li>
+                <li>References use direct variable names (var.namespace)</li>
+                <li>Functions like jsonencode instead of YAML structures</li>
+                <li>References to other resources use resource_type.resource_name.attribute</li>
+            </ul>
+        </div>
+        
+        <div id="lesson3-2" class="lesson">
+            <h3>Lesson 2: Data Sources</h3>
+            
+            <h4>Data Source Example (from <code>data.tf</code>):</h4>
+            <pre><code>data "aws_region" "current" {}
+
+data "aws_caller_identity" "current" {}
+
+data "aws_partition" "current" {}</code></pre>
+            
+            <h4>Using Data Sources:</h4>
+            <pre><code>resource "aws_iam_policy" "example" {
+  # ...
+  policy = jsonencode({
+    Statement = [{
+      Resource = "arn:${data.aws_partition.current.partition}:s3:::example-bucket"
+    }]
+  })
+}</code></pre>
+            
+            <h4>CloudFormation Equivalent:</h4>
+            <pre><code># Uses pseudoparameters
+Resource: !Sub "arn:${AWS::Partition}:s3:::example-bucket"</code></pre>
+            
+            <div class="exercise">
+                <h4>Practical Exercise:</h4>
+                <p>Create a data source to look up an existing VPC and its subnets. Then reference these resources in a security group resource for Lambda functions.</p>
+            </div>
+        </div>
+    </section>
+    
+    <section id="module4" class="module">
+        <h2>Module 4: Understanding Modules</h2>
+        
+        <div id="lesson4-1" class="lesson">
+            <h3>Lesson 1: Module Basics</h3>
+            
+            <h4>Module Definition (folder structure):</h4>
+            <pre><code>modules/
+  iam/
+    main.tf
+    variables.tf
+    outputs.tf</code></pre>
+            
+            <h4>Module Usage (from <code>main.tf</code>):</h4>
+            <pre><code>module "iam" {
+  source = "./modules/iam"
+  
+  namespace                    = var.namespace
+  stack_name                   = local.stack_name
+  kms_key_arn                  = module.kms.key_arn
+  # ...other inputs
+}</code></pre>
+            
+            <h4>CloudFormation Equivalent:</h4>
+            <ul>
+                <li>Nested stacks, but with key differences</li>
+                <li>More similar to custom resources</li>
+            </ul>
+        </div>
+        
+        <div id="lesson4-2" class="lesson">
+            <h3>Lesson 2: Module Inputs and Outputs</h3>
+            
+            <h4>Module Input Variables (from <code>modules/iam/main.tf</code>):</h4>
+            <pre><code>variable "namespace" {
+  description = "Namespace for resource naming"
+  type        = string
+}
+
+variable "kms_key_arn" {
+  description = "ARN of the KMS key for encryption"
+  type        = string
+}</code></pre>
+            
+            <h4>Module Outputs:</h4>
+            <pre><code>output "scheduler_role_arn" {
+  description = "ARN of the scheduler role"
+  value       = aws_iam_role.scheduler_role.arn
+}</code></pre>
+            
+            <h4>CloudFormation Equivalent:</h4>
+            <ul>
+                <li>Parameters for inputs</li>
+                <li>Outputs for outputs, but accessible only via Export/ImportValue</li>
+            </ul>
+        </div>
+        
+        <div id="lesson4-3" class="lesson">
+            <h3>Lesson 3: Module Organization in the Instance Scheduler</h3>
+            
+            <h4>Instance Scheduler Modules:</h4>
+            <ol>
+                <li><code>app_registry</code> - Service Catalog AppRegistry</li>
+                <li><code>kms</code> - KMS key management</li>
+                <li><code>sns</code> - SNS topic</li>
+                <li><code>dynamodb</code> - DynamoDB tables</li>
+                <li><code>iam</code> - IAM roles and policies</li>
+                <li><code>lambda</code> - Lambda functions</li>
+                <li><code>cloudwatch</code> - CloudWatch resources</li>
+            </ol>
+            
+            <h4>Key Design Principles:</h4>
+            <ul>
+                <li>Separation of concerns</li>
+                <li>Resource grouping by service</li>
+                <li>Explicit dependencies via inputs/outputs</li>
+                <li>Reusable components</li>
+            </ul>
+            
+            <div class="exercise">
+                <h4>Practical Exercise:</h4>
+                <p>Create a new module for an S3 bucket to store scheduler logs. Include variables for bucket naming, encryption settings, and lifecycle policies.</p>
+            </div>
+        </div>
+    </section>
+    
+    <section id="module5" class="module">
+        <h2>Module 5: Functions and Expressions</h2>
+        
+        <div id="lesson5-1" class="lesson">
+            <h3>Lesson 1: Terraform Functions</h3>
+            
+            <h4>Common Functions in the Instance Scheduler:</h4>
+            
+            <p><strong>1. String Functions:</strong></p>
+            <pre><code># String interpolation
+"${var.namespace}-Scheduler-Role"
+
+# Join function
+join(",", var.schedule_regions)</code></pre>
+            
+            <p><strong>2. Collection Functions:</strong></p>
+            <pre><code># List splitting
+split(",", var.regions)
+
+# Conditional expressions
+var.trace_enabled ? "DEBUG" : "INFO"</code></pre>
+            
+            <p><strong>3. Type Conversion:</strong></p>
+            <pre><code>tostring(var.scheduler_frequency)</code></pre>
+            
+            <h4>CloudFormation Equivalent:</h4>
+            <ul>
+                <li>!Sub, !Join, !Split, !If</li>
+            </ul>
+        </div>
+        
+        <div id="lesson5-2" class="lesson">
+            <h3>Lesson 2: Dynamic Blocks</h3>
+            
+            <h4>Dynamic Block Example:</h4>
+            <pre><code>dynamic "filter" {
+  for_each = local.filter_conditions
+  content {
+    pattern = jsonencode(filter.value)
+  }
+}</code></pre>
+            
+            <h4>CloudFormation Equivalent:</h4>
+            <ul>
+                <li>No direct equivalent - would require multiple resources</li>
+            </ul>
+        </div>
+        
+        <div id="lesson5-3" class="lesson">
+            <h3>Lesson 3: Template Files</h3>
+            
+            <h4>Dashboard Template (from the Instance Scheduler):</h4>
+            <pre><code>resource "aws_cloudwatch_dashboard" "operational_insights_dashboard" {
+  dashboard_name = "${local.stack_name}-${var.namespace}-Operational-Insights-Dashboard"
+  dashboard_body = templatefile("${path.module}/templates/operational_dashboard.json.tpl", {
+    aws_region = data.aws_region.current.name
+    stack_name = local.stack_name
+    scheduler_frequency = var.scheduler_frequency
+    metrics_interval_seconds = local.metrics_interval_seconds
+  })
+}</code></pre>
+            
+            <h4>Template File (excerpt):</h4>
+            <pre><code>{
+  "widgets": [
+    {
+      "metrics": [
+        [
+          {
+            "expression": "SEARCH('{\\\"${stack_name}:InstanceScheduler\\\",Service,...)"
+          }
+        ]
+      ]
+    }
+  ]
+}</code></pre>
+            
+            <h4>CloudFormation Equivalent:</h4>
+            <ul>
+                <li>Intrinsic functions within YAML/JSON</li>
+            </ul>
+            
+            <div class="exercise">
+                <h4>Practical Exercise:</h4>
+                <p>Modify the dashboard template to add a widget showing Lambda cold starts. You'll need to update both the template file and the dashboard resource.</p>
+            </div>
+        </div>
+    </section>
+    
+    <section id="module6" class="module">
+        <h2>Module 6: State Management and Deployment</h2>
+        
+        <div id="lesson6-1" class="lesson">
+            <h3>Lesson 1: Understanding Terraform State</h3>
+            
+            <h4>State Concepts:</h4>
+            <ul>
+                <li>Terraform state tracks all resources</li>
+                <li>Maps configurations to real-world resources</li>
+                <li>Stores metadata about dependencies</li>
+                <li>Enables resource planning</li>
+            </ul>
+            
+            <h4>State Management Approaches:</h4>
+            <ol>
+                <li>Local state (terraform.tfstate)</li>
+                <li>Remote state (S3 + DynamoDB)</li>
+                <li>Terraform Cloud/Enterprise</li>
+            </ol>
+            
+            <h4>Example <code>backend.tf</code> for AWS:</h4>
+            <pre><code>terraform {
+  backend "s3" {
+    bucket         = "terraform-state-bucket"
+    key            = "instance-scheduler/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
+}</code></pre>
+        </div>
+        
+        <div id="lesson6-2" class="lesson">
+            <h3>Lesson 2: Deployment Workflow</h3>
+            
+            <h4>Terraform Workflow vs CloudFormation:</h4>
+            
+            <table>
+                <tr>
+                    <th>CloudFormation</th>
+                    <th>Terraform</th>
+                </tr>
+                <tr>
+                    <td>Create/Update Stack</td>
+                    <td>terraform plan & apply</td>
+                </tr>
+                <tr>
+                    <td>Delete Stack</td>
+                    <td>terraform destroy</td>
+                </tr>
+                <tr>
+                    <td>Change Sets</td>
+                    <td>terraform plan</td>
+                </tr>
+                <tr>
+                    <td>Stack Drift</td>
+                    <td>terraform plan</td>
+                </tr>
+                <tr>
+                    <td>CloudFormation Designer</td>
+                    <td>(No equivalent)</td>
+                </tr>
+            </table>
+            
+            <h4>Typical Terraform Commands:</h4>
+            <pre><code># Initialize project
+terraform init
+
+# Check configuration
+terraform validate
+
+# Preview changes
+terraform plan -out=plan.out
+
+# Apply changes
+terraform apply plan.out
+
+# Destroy resources
+terraform destroy</code></pre>
+            
+            <div class="exercise">
+                <h4>Practical Exercise:</h4>
+                <p>Set up remote state for your Instance Scheduler deployment. Configure locking with DynamoDB to prevent concurrent modifications.</p>
+            </div>
+        </div>
+    </section>
+    
+    <section id="module7" class="module">
+        <h2>Module 7: Making Modifications</h2>
+        
+        <div id="lesson7-1" class="lesson">
+            <h3>Lesson 1: Adding New Resources</h3>
+            
+            <h4>Task: Add S3 Bucket for Scheduler Logs</h4>
+            
+            <p>1. Create module:</p>
+            <pre><code># modules/s3/main.tf
+resource "aws_s3_bucket" "logs" {
+  bucket = "${var.stack_name}-scheduler-logs"
+  
+  tags = var.tags
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
+  bucket = aws_s3_bucket.logs.id
+  
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = var.kms_key_arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}</code></pre>
+            
+            <p>2. Update main.tf:</p>
+            <pre><code>module "s3" {
+  source     = "./modules/s3"
+  stack_name = local.stack_name
+  kms_key_arn = module.kms.key_arn
+  tags       = local.common_tags
+}</code></pre>
+        </div>
+        
+        <div id="lesson7-2" class="lesson">
+            <h3>Lesson 2: Modifying Existing Resources</h3>
+            
+            <h4>Task: Add New Lambda Environment Variables</h4>
+            
+            <p>1. Add new variable:</p>
+            <pre><code># variables.tf
+variable "enable_enhanced_logging" {
+  type        = bool
+  default     = false
+  description = "Enable enhanced logging for Lambda functions"
+}</code></pre>
+            
+            <p>2. Update Lambda module:</p>
+            <pre><code># modules/lambda/main.tf
+resource "aws_lambda_function" "scheduling_orchestrator" {
+  # Existing configuration...
+  
+  environment {
+    variables = merge(
+      {
+        # Existing variables...
+      },
+      var.enable_enhanced_logging ? {
+        LOG_LEVEL = "DEBUG"
+        ENHANCED_METRICS = "True"
+      } : {}
+    )
+  }
+}</code></pre>
+        </div>
+        
+        <div id="lesson7-3" class="lesson">
+            <h3>Lesson 3: Advanced Customization</h3>
+            
+            <h4>Task: Supporting Multiple Regions</h4>
+            
+            <p>1. Using Terraform providers for multiple regions:</p>
+            <pre><code># versions.tf
+provider "aws" {
+  alias  = "us-east-1"
+  region = "us-east-1"
+}
+
+provider "aws" {
+  alias  = "us-west-2"
+  region = "us-west-2"
+}</code></pre>
+            
+            <p>2. Using providers in modules:</p>
+            <pre><code>module "lambda_us_east_1" {
+  source = "./modules/lambda"
+  providers = {
+    aws = aws.us-east-1
+  }
+  # Other inputs...
+}</code></pre>
+            
+            <div class="exercise">
+                <h4>Practical Exercise:</h4>
+                <p>Add tags based on environment and team ownership. Create a locals block that merges common tags with environment-specific tags, and use it across all resources.</p>
+            </div>
+        </div>
+    </section>
+    
+    <section id="module8" class="module">
+        <h2>Module 8: Debugging and Troubleshooting</h2>
+        
+        <div id="lesson8-1" class="lesson">
+            <h3>Lesson 1: Common Issues and Solutions</h3>
+            
+            <h4>Issue 1: Resource Not Found During Apply</h4>
+            <ul>
+                <li>Check for typos in resource references</li>
+                <li>Ensure resources exist if using data sources</li>
+                <li>Verify provider configuration</li>
+            </ul>
+            
+            <h4>Issue 2: State Conflicts</h4>
+            <ul>
+                <li>Use terraform import to bring existing resources under management</li>
+                <li>Carefully review terraform plan output</li>
+                <li>Use terraform state commands to fix state issues</li>
+            </ul>
+            
+            <h4>Issue 3: Permission Errors</h4>
+            <ul>
+                <li>Ensure IAM permissions for both Terraform and created resources</li>
+                <li>Check assumed roles for cross-account deployments</li>
+            </ul>
+        </div>
+        
+        <div id="lesson8-2" class="lesson">
+            <h3>Lesson 2: Debugging Techniques</h3>
+            
+            <h4>Technique 1: Terraform Logging</h4>
+            <pre><code>export TF_LOG=DEBUG
+terraform apply</code></pre>
+            
+            <h4>Technique 2: Output Variables for Debugging</h4>
+            <pre><code>output "debug_iam_policy" {
+  value = jsondecode(aws_iam_policy.example.policy)
+}</code></pre>
+            
+            <h4>Technique 3: Check Created Resources in AWS Console</h4>
+            <ul>
+                <li>Verify resource properties match expectations</li>
+                <li>Look for error messages in CloudTrail logs</li>
+            </ul>
+            
+            <div class="exercise">
+                <h4>Practical Exercise:</h4>
+                <p>Debug a common IAM permission issue with the scheduler. Implement a diagnostic output that shows the permissions being assigned to the scheduler role.</p>
+            </div>
+        </div>
+    </section>
+    
+    <section id="finalproject" class="module">
+        <h2>Final Project: Extending the Instance Scheduler</h2>
+        
+        <p>Create an extension to the Instance Scheduler with these features:</p>
+        
+        <ol>
+            <li>Add SNS alerting for scheduled operations</li>
+            <li>Implement cost estimation for saved instance hours</li>
+            <li>Create a cross-region deployment configuration</li>
+        </ol>
+        
+        <p>This project will solidify your understanding of Terraform concepts while providing practical value to the Instance Scheduler implementation.</p>
+    </section>
+    
+    <section id="appendix1" class="module">
+        <h2>Appendix: Terraform CLI Reference</h2>
+        
+        <table>
+            <tr>
+                <th>Command</th>
+                <th>Description</th>
+                <th>CloudFormation Equivalent</th>
+            </tr>
+            <tr>
+                <td>terraform init</td>
+                <td>Initialize working directory</td>
+                <td>N/A</td>
+            </tr>
+            <tr>
+                <td>terraform plan</td>
+                <td>Create execution plan</td>
+                <td>Preview change set</td>
+            </tr>
+            <tr>
+                <td>terraform apply</td>
+                <td>Apply changes</td>
+                <td>Execute change set</td>
+            </tr>
+            <tr>
+                <td>terraform destroy</td>
+                <td>Destroy infrastructure</td>
+                <td>Delete stack</td>
+            </tr>
+            <tr>
+                <td>terraform validate</td>
+                <td>Validate configuration</td>
+                <td>Validate template</td>
+            </tr>
+            <tr>
+                <td>terraform fmt</td>
+                <td>Format configuration</td>
+                <td>N/A</td>
+            </tr>
+            <tr>
+                <td>terraform state</td>
+                <td>Manipulate state</td>
+                <td>N/A</td>
+            </tr>
+            <tr>
+                <td>terraform import</td>
+                <td>Import existing resources</td>
+                <td>N/A</td>
+            </tr>
+            <tr>
+                <td>terraform output</td>
+                <td>View outputs</td>
+                <td>Describe stacks outputs</td>
+            </tr>
+        </table>
+    </section>
+    
+    <section id="appendix2" class="module">
+        <h2>Appendix: Terraform vs CloudFormation Terminology</h2>
+        
+        <table>
+            <tr>
+                <th>CloudFormation</th>
+                <th>Terraform</th>
+            </tr>
+            <tr>
+                <td>Template</td>
+                <td>Configuration (.tf files)</td>
+            </tr>
+            <tr>
+                <td>Stack</td>
+                <td>State</td>
+            </tr>
+            <tr>
+                <td>Resources</td>
+                <td>Resources</td>
+            </tr>
+            <tr>
+                <td>Parameters</td>
+                <td>Variables</td>
+            </tr>
+            <tr>
+                <td>Mappings</td>
+                <td>Local values (maps)</td>
+            </tr>
+            <tr>
+                <td>Outputs</td>
+                <td>Outputs</td>
+            </tr>
+            <tr>
+                <td>Pseudo Parameters</td>
+                <td>Data sources</td>
+            </tr>
+            <tr>
+                <td>Conditions</td>
+                <td>Conditional expressions</td>
+            </tr>
+            <tr>
+                <td>Intrinsic Functions</td>
+                <td>Functions</td>
+            </tr>
+            <tr>
+                <td>Nested Stacks</td>
+                <td>Modules</td>
+            </tr>
+            <tr>
+                <td>Resource Import</td>
+                <td>terraform import</td>
+            </tr>
+        </table>
+    </section>
+    
+    <footer>
+        <p>© 2025 AWS Instance Scheduler: Terraform Implementation</p>
+        <p>Created for CloudFormation experts transitioning to Terraform</p>
+    </footer>
+</body>
+</html>
