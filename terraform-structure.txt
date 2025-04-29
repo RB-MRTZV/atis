@@ -1,0 +1,56 @@
+# AWS Instance Scheduler Terraform Project Structure
+
+```
+aws-instance-scheduler/
+├── main.tf               # Main deployment file
+├── variables.tf          # Input parameters
+├── outputs.tf            # Stack outputs
+├── locals.tf             # Local values and mappings
+├── versions.tf           # Terraform and provider versions
+├── data.tf               # Data sources
+└── modules/
+    ├── app_registry/     # Service Catalog AppRegistry
+    ├── dynamodb/         # DynamoDB tables
+    ├── iam/              # IAM roles and policies
+    ├── kms/              # KMS key for encryption
+    ├── lambda/           # Lambda functions
+    ├── metrics/          # Operational metrics and dashboard
+    ├── sns/              # SNS topic
+    └── cloudwatch/       # CloudWatch resources
+```
+
+# Key Implementation Points
+
+1. **Module Structure:**
+   - Each core AWS service has its own module for clean separation
+   - Resource dependencies are explicitly managed
+
+2. **State Management:**
+   - Variables map directly to CloudFormation parameters
+   - All conditions and mappings are converted to Terraform locals
+
+3. **Naming Conventions:**
+   - Resources named to match CloudFormation outputs
+   - Variables follow Terraform conventions (snake_case)
+
+4. **Security:**
+   - KMS encryption maintained for all sensitive resources
+   - IAM permissions match the original template exactly
+   - DynamoDB deletion protection is preserved
+
+5. **Multi-Account Support:**
+   - Hub-and-spoke architecture maintained
+   - Cross-account IAM role configurations preserved
+
+# Resource Mappings
+Each CloudFormation resource has a corresponding Terraform resource with identical properties:
+
+- `AWS::ServiceCatalogAppRegistry::Application` → `aws_servicecatalogappregistry_application`
+- `AWS::KMS::Key` → `aws_kms_key`
+- `AWS::SNS::Topic` → `aws_sns_topic`
+- `AWS::DynamoDB::Table` → `aws_dynamodb_table`
+- `AWS::Lambda::Function` → `aws_lambda_function`
+- `AWS::IAM::Role` → `aws_iam_role`
+- `AWS::IAM::Policy` → `aws_iam_policy`
+- `AWS::Events::Rule` → `aws_cloudwatch_event_rule`
+- `AWS::CloudWatch::Dashboard` → `aws_cloudwatch_dashboard`

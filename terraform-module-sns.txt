@@ -1,0 +1,25 @@
+# SNS Topic module for Instance Scheduler
+# Used for sending notifications and issues
+
+variable "kms_key_arn" {
+  description = "ARN of the KMS key to use for encryption"
+  type        = string
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+# Create SNS topic for notifications
+resource "aws_sns_topic" "instance_scheduler" {
+  name              = "InstanceScheduler-Notifications"
+  kms_master_key_id = var.kms_key_arn
+  tags              = var.tags
+}
+
+output "topic_arn" {
+  description = "ARN of the SNS topic"
+  value       = aws_sns_topic.instance_scheduler.arn
+}

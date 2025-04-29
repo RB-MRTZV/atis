@@ -1,0 +1,590 @@
+# Lambda functions for AWS Instance Scheduler
+
+variable "stack_name" {
+  description = "Name of the CloudFormation stack"
+  type        = string
+}
+
+variable "namespace" {
+  description = "Namespace for resource naming"
+  type        = string
+}
+
+variable "s3_bucket" {
+  description = "S3 bucket containing Lambda code"
+  type        = string
+}
+
+variable "s3_key" {
+  description = "S3 key for Lambda code"
+  type        = string
+}
+
+variable "memory_size" {
+  description = "Memory size for the main scheduling Lambda"
+  type        = number
+  default     = 128
+}
+
+variable "asg_memory_size" {
+  description = "Memory size for the ASG handler Lambda"
+  type        = number
+  default     = 128
+}
+
+variable "orchestrator_memory_size" {
+  description = "Memory size for the orchestrator Lambda"
+  type        = number
+  default     = 128
+}
+
+variable "scheduler_orchestrator_role_arn" {
+  description = "ARN of the scheduler orchestrator IAM role"
+  type        = string
+}
+
+variable "scheduling_request_handler_role_arn" {
+  description = "ARN of the scheduling request handler IAM role"
+  type        = string
+}
+
+variable "asg_role_arn" {
+  description = "ARN of the ASG handler IAM role"
+  type        = string
+}
+
+variable "log_group_name" {
+  description = "Name of the CloudWatch log group"
+  type        = string
+}
+
+variable "sns_topic_arn" {
+  description = "ARN of the SNS topic"
+  type        = string
+}
+
+variable "config_table_name" {
+  description = "Name of the configuration DynamoDB table"
+  type        = string
+}
+
+variable "state_table_name" {
+  description = "Name of the state DynamoDB table"
+  type        = string
+}
+
+variable "maintenance_window_table_name" {
+  description = "Name of the maintenance window DynamoDB table"
+  type        = string
+}
+
+variable "send_anonymous_data" {
+  description = "Whether to send anonymous usage data"
+  type        = bool
+  default     = true
+}
+
+variable "trace_enabled" {
+  description = "Whether to enable debug logging"
+  type        = bool
+  default     = false
+}
+
+variable "scheduling_active" {
+  description = "Whether scheduling is active"
+  type        = bool
+  default     = true
+}
+
+variable "schedule_lambda_account" {
+  description = "Whether to schedule resources in the hub account"
+  type        = bool
+  default     = true
+}
+
+variable "scheduler_frequency" {
+  description = "Frequency of scheduling in minutes"
+  type        = number
+  default     = 5
+}
+
+variable "default_timezone" {
+  description = "Default timezone for schedules"
+  type        = string
+  default     = "UTC"
+}
+
+variable "tag_name" {
+  description = "Tag key used for scheduling"
+  type        = string
+  default     = "Schedule"
+}
+
+variable "started_tags" {
+  description = "Tags to apply to started instances"
+  type        = string
+  default     = ""
+}
+
+variable "stopped_tags" {
+  description = "Tags to apply to stopped instances"
+  type        = string
+  default     = ""
+}
+
+variable "schedule_regions" {
+  description = "List of regions to schedule"
+  type        = list(string)
+  default     = []
+}
+
+variable "enable_ssm_maintenance_windows" {
+  description = "Whether to enable SSM maintenance windows"
+  type        = bool
+  default     = false
+}
+
+variable "schedule_ec2" {
+  description = "Whether EC2 scheduling is enabled"
+  type        = bool
+  default     = true
+}
+
+variable "schedule_rds" {
+  description = "Whether RDS scheduling is enabled"
+  type        = bool
+  default     = true
+}
+
+variable "enable_rds_clusters" {
+  description = "Whether RDS cluster scheduling is enabled"
+  type        = bool
+  default     = true
+}
+
+variable "schedule_neptune" {
+  description = "Whether Neptune scheduling is enabled"
+  type        = bool
+  default     = true
+}
+
+variable "schedule_docdb" {
+  description = "Whether DocumentDB scheduling is enabled"
+  type        = bool
+  default     = true
+}
+
+variable "create_rds_snapshot" {
+  description = "Whether to create RDS snapshots before stopping"
+  type        = bool
+  default     = false
+}
+
+variable "using_aws_organizations" {
+  description = "Whether to use AWS Organizations"
+  type        = bool
+  default     = false
+}
+
+variable "ops_monitoring" {
+  description = "Whether to enable operational monitoring"
+  type        = bool
+  default     = true
+}
+
+variable "schedule_asgs" {
+  description = "Whether ASG scheduling is enabled"
+  type        = bool
+  default     = true
+}
+
+variable "asg_scheduled_tag_key" {
+  description = "Tag key for scheduled ASGs"
+  type        = string
+  default     = "scheduled"
+}
+
+variable "asg_rule_prefix" {
+  description = "Prefix for ASG scheduled rules"
+  type        = string
+  default     = "is-"
+}
+
+variable "metrics_uuid" {
+  description = "UUID for metrics collection"
+  type        = string
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+locals {
+  solution_id      = "SO0030"
+  solution_version = "v3.0.9"
+}
+
+# Orchestrator Lambda
+resource "aws_lambda_function" "scheduling_orchestrator" {
+  function_name    = "${var.stack_name}-SchedulingOrchestrator"
+  description      = "scheduling orchestrator for Instance Scheduler on AWS, version ${local.solution_version}"
+  s3_bucket        = var.s3_bucket
+  s3_key           = var.s3_key
+  role             = var.scheduler_orchestrator_role_arn
+  handler          = "instance_scheduler.handler.scheduling_orchestrator.handle_orchestration_request"
+  runtime          = "python3.11"
+  timeout          = 300
+  memory_size      = var.orchestrator_memory_size
+  
+  tracing_config {
+    mode = "Active"
+  }
+  
+  environment {
+    variables = {
+      USER_AGENT_EXTRA          = "AwsSolution/${local.solution_id}/${local.solution_version}"
+      LOG_GROUP                 = var.log_group_name
+      ISSUES_TOPIC_ARN          = var.sns_topic_arn
+      ENABLE_DEBUG_LOGS         = var.trace_enabled ? "True" : "False"
+      CONFIG_TABLE              = var.config_table_name
+      SCHEDULING_REQUEST_HANDLER_NAME = aws_lambda_function.scheduling_request_handler.function_name
+      ENABLE_SCHEDULE_HUB_ACCOUNT = var.schedule_lambda_account ? "True" : "False"
+      ENABLE_EC2_SERVICE        = var.schedule_ec2 ? "True" : "False"
+      ENABLE_RDS_SERVICE        = var.schedule_rds ? "True" : "False"
+      ENABLE_RDS_CLUSTERS       = var.enable_rds_clusters ? "True" : "False"
+      ENABLE_NEPTUNE_SERVICE    = var.schedule_neptune ? "True" : "False"
+      ENABLE_DOCDB_SERVICE      = var.schedule_docdb ? "True" : "False"
+      ENABLE_ASG_SERVICE        = var.schedule_asgs ? "True" : "False"
+      SCHEDULE_REGIONS          = join(",", var.schedule_regions)
+      DEFAULT_TIMEZONE          = var.default_timezone
+      ENABLE_RDS_SNAPSHOTS      = var.create_rds_snapshot ? "True" : "False"
+      ENABLE_AWS_ORGANIZATIONS  = var.using_aws_organizations ? "True" : "False"
+      ENABLE_EC2_SSM_MAINTENANCE_WINDOWS = var.enable_ssm_maintenance_windows ? "True" : "False"
+      OPS_DASHBOARD_ENABLED     = var.ops_monitoring ? "True" : "False"
+      START_TAGS                = var.started_tags
+      STOP_TAGS                 = var.stopped_tags
+      METRICS_URL               = "https://metrics.awssolutionsbuilder.com/generic"
+      SEND_METRICS              = var.send_anonymous_data ? "True" : "False"
+      SOLUTION_ID               = local.solution_id
+      SOLUTION_VERSION          = local.solution_version
+      SCHEDULING_INTERVAL_MINUTES = tostring(var.scheduler_frequency)
+      METRICS_UUID              = var.metrics_uuid
+    }
+  }
+  
+  tags = var.tags
+}
+
+# Scheduling request handler Lambda
+resource "aws_lambda_function" "scheduling_request_handler" {
+  function_name    = "${var.stack_name}-SchedulingRequestHandler"
+  description      = "Handles scheduling requests for Instance Scheduler on AWS, version ${local.solution_version}"
+  s3_bucket        = var.s3_bucket
+  s3_key           = var.s3_key
+  role             = var.scheduling_request_handler_role_arn
+  handler          = "instance_scheduler.handler.scheduling_request.handle_scheduling_request"
+  runtime          = "python3.11"
+  timeout          = 300
+  memory_size      = var.memory_size
+  
+  tracing_config {
+    mode = "Active"
+  }
+  
+  environment {
+    variables = {
+      CONFIG_TABLE              = var.config_table_name
+      STATE_TABLE               = var.state_table_name
+      MAINT_WINDOW_TABLE        = var.maintenance_window_table_name
+      USER_AGENT_EXTRA          = "AwsSolution/${local.solution_id}/${local.solution_version}"
+      STACK_NAME                = var.stack_name
+      LOG_GROUP                 = var.log_group_name
+      ISSUES_TOPIC_ARN          = var.sns_topic_arn
+      ENABLE_DEBUG_LOGS         = var.trace_enabled ? "True" : "False"
+      SCHEDULER_ROLE_NAME       = "${var.namespace}-Scheduler-Role"
+      DEFAULT_TIMEZONE          = var.default_timezone
+      START_TAGS                = var.started_tags
+      STOP_TAGS                 = var.stopped_tags
+      SCHEDULE_TAG_KEY          = var.tag_name
+      ENABLE_EC2_SSM_MAINTENANCE_WINDOWS = var.enable_ssm_maintenance_windows ? "True" : "False"
+      ENABLE_RDS_SERVICE        = var.schedule_rds ? "True" : "False"
+      ENABLE_RDS_CLUSTERS       = var.enable_rds_clusters ? "True" : "False"
+      ENABLE_NEPTUNE_SERVICE    = var.schedule_neptune ? "True" : "False"
+      ENABLE_DOCDB_SERVICE      = var.schedule_docdb ? "True" : "False"
+      ENABLE_RDS_SNAPSHOTS      = var.create_rds_snapshot ? "True" : "False"
+      ENABLE_OPS_MONITORING     = var.ops_monitoring ? "True" : "False"
+      METRICS_URL               = "https://metrics.awssolutionsbuilder.com/generic"
+      SEND_METRICS              = var.send_anonymous_data ? "True" : "False"
+      SOLUTION_ID               = local.solution_id
+      SOLUTION_VERSION          = local.solution_version
+      SCHEDULING_INTERVAL_MINUTES = tostring(var.scheduler_frequency)
+      METRICS_UUID              = var.metrics_uuid
+    }
+  }
+  
+  tags = var.tags
+}
+
+# ASG Handler Lambda
+resource "aws_lambda_function" "asg_handler" {
+  count           = var.schedule_asgs ? 1 : 0
+  function_name   = "${var.stack_name}-ASGHandler"
+  description     = "Instance Scheduler for AutoScaling Groups version ${local.solution_version}"
+  s3_bucket       = var.s3_bucket
+  s3_key          = var.s3_key
+  role            = var.asg_role_arn
+  handler         = "instance_scheduler.handler.asg.lambda_handler"
+  runtime         = "python3.11"
+  timeout         = 300
+  memory_size     = var.asg_memory_size
+  
+  tracing_config {
+    mode = "Active"
+  }
+  
+  environment {
+    variables = {
+      CONFIG_TABLE              = var.config_table_name
+      USER_AGENT_EXTRA          = "AwsSolution/${local.solution_id}/${local.solution_version}"
+      ISSUES_TOPIC_ARN          = var.sns_topic_arn
+      POWERTOOLS_LOG_LEVEL      = var.trace_enabled ? "DEBUG" : "INFO"
+      POWERTOOLS_SERVICE_NAME   = "asg"
+      ASG_SCHEDULING_ROLE_NAME  = "${var.namespace}-ASG-Scheduling-Role"
+      DEFAULT_TIMEZONE          = var.default_timezone
+      SCHEDULE_TAG_KEY          = var.tag_name
+      SCHEDULED_TAG_KEY         = var.asg_scheduled_tag_key
+      RULE_PREFIX               = var.asg_rule_prefix
+      METRICS_URL               = "https://metrics.awssolutionsbuilder.com/generic"
+      SEND_METRICS              = var.send_anonymous_data ? "True" : "False"
+      SOLUTION_ID               = local.solution_id
+      SOLUTION_VERSION          = local.solution_version
+      SCHEDULING_INTERVAL_MINUTES = tostring(var.scheduler_frequency)
+      METRICS_UUID              = var.metrics_uuid
+    }
+  }
+  
+  tags = var.tags
+}
+
+# ASG Orchestrator Lambda
+resource "aws_lambda_function" "asg_orchestrator" {
+  count           = var.schedule_asgs ? 1 : 0
+  function_name   = "${var.stack_name}-ASGOrchestrator"
+  description     = "Instance Scheduler orchestrator for AutoScaling Groups version ${local.solution_version}"
+  s3_bucket       = var.s3_bucket
+  s3_key          = var.s3_key
+  role            = var.scheduler_orchestrator_role_arn  # Reusing the orchestrator role
+  handler         = "instance_scheduler.handler.asg_orchestrator.lambda_handler"
+  runtime         = "python3.11"
+  timeout         = 60
+  memory_size     = var.orchestrator_memory_size
+  
+  tracing_config {
+    mode = "Active"
+  }
+  
+  environment {
+    variables = {
+      USER_AGENT_EXTRA          = "AwsSolution/${local.solution_id}/${local.solution_version}"
+      CONFIG_TABLE              = var.config_table_name
+      ISSUES_TOPIC_ARN          = var.sns_topic_arn
+      ENABLE_SCHEDULE_HUB_ACCOUNT = var.schedule_lambda_account ? "True" : "False"
+      SCHEDULE_REGIONS          = join(",", var.schedule_regions)
+      ASG_SCHEDULER_NAME        = aws_lambda_function.asg_handler[0].function_name
+      POWERTOOLS_LOG_LEVEL      = var.trace_enabled ? "DEBUG" : "INFO"
+      POWERTOOLS_SERVICE_NAME   = "asg_orch"
+      METRICS_URL               = "https://metrics.awssolutionsbuilder.com/generic"
+      SEND_METRICS              = var.send_anonymous_data ? "True" : "False"
+      SOLUTION_ID               = local.solution_id
+      SOLUTION_VERSION          = local.solution_version
+      SCHEDULING_INTERVAL_MINUTES = tostring(var.scheduler_frequency)
+      METRICS_UUID              = var.metrics_uuid
+    }
+  }
+  
+  tags = var.tags
+}
+
+# Schedule update handler Lambda for ASG
+resource "aws_lambda_function" "asg_schedule_update_handler" {
+  count           = var.schedule_asgs ? 1 : 0
+  function_name   = "${var.stack_name}-ASGScheduleUpdateHandler"
+  description     = "Instance Scheduler handler for updates to schedules version ${local.solution_version}"
+  s3_bucket       = var.s3_bucket
+  s3_key          = var.s3_key
+  role            = var.scheduler_orchestrator_role_arn  # Reusing the orchestrator role
+  handler         = "instance_scheduler.handler.schedule_update.lambda_handler"
+  runtime         = "python3.11"
+  timeout         = 60
+  memory_size     = var.orchestrator_memory_size
+  
+  tracing_config {
+    mode = "Active"
+  }
+  
+  environment {
+    variables = {
+      USER_AGENT_EXTRA          = "AwsSolution/${local.solution_id}/${local.solution_version}"
+      CONFIG_TABLE              = var.config_table_name
+      ISSUES_TOPIC_ARN          = var.sns_topic_arn
+      ENABLE_SCHEDULE_HUB_ACCOUNT = var.schedule_lambda_account ? "True" : "False"
+      SCHEDULE_REGIONS          = join(",", var.schedule_regions)
+      ASG_SCHEDULER_NAME        = aws_lambda_function.asg_handler[0].function_name
+      POWERTOOLS_LOG_LEVEL      = var.trace_enabled ? "DEBUG" : "INFO"
+      POWERTOOLS_SERVICE_NAME   = "sch_upd"
+      METRICS_URL               = "https://metrics.awssolutionsbuilder.com/generic"
+      SEND_METRICS              = var.send_anonymous_data ? "True" : "False"
+      SOLUTION_ID               = local.solution_id
+      SOLUTION_VERSION          = local.solution_version
+      SCHEDULING_INTERVAL_MINUTES = tostring(var.scheduler_frequency)
+      METRICS_UUID              = var.metrics_uuid
+    }
+  }
+  
+  tags = var.tags
+}
+
+# Log groups for each Lambda
+resource "aws_cloudwatch_log_group" "scheduling_orchestrator_log_group" {
+  name              = "/aws/lambda/${aws_lambda_function.scheduling_orchestrator.function_name}"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "scheduling_request_handler_log_group" {
+  name              = "/aws/lambda/${aws_lambda_function.scheduling_request_handler.function_name}"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "asg_handler_log_group" {
+  count             = var.schedule_asgs ? 1 : 0
+  name              = "/aws/lambda/${aws_lambda_function.asg_handler[0].function_name}"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "asg_orchestrator_log_group" {
+  count             = var.schedule_asgs ? 1 : 0
+  name              = "/aws/lambda/${aws_lambda_function.asg_orchestrator[0].function_name}"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "asg_schedule_update_handler_log_group" {
+  count             = var.schedule_asgs ? 1 : 0
+  name              = "/aws/lambda/${aws_lambda_function.asg_schedule_update_handler[0].function_name}"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+# Lambda permissions for CloudWatch Events
+resource "aws_lambda_permission" "scheduler_event_permission" {
+  statement_id  = "AllowExecutionFromCloudWatch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.scheduling_orchestrator.function_name
+  principal     = "events.amazonaws.com"
+}
+
+resource "aws_lambda_permission" "asg_orchestrator_permission" {
+  count         = var.schedule_asgs ? 1 : 0
+  statement_id  = "AllowExecutionFromCloudWatch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.asg_orchestrator[0].function_name
+  principal     = "events.amazonaws.com"
+}
+
+# Event source mapping for DynamoDB stream to ASG schedule update handler
+resource "aws_lambda_event_source_mapping" "asg_schedule_update_mapping" {
+  count                  = var.schedule_asgs ? 1 : 0
+  event_source_arn       = var.config_table_stream_arn
+  function_name          = aws_lambda_function.asg_schedule_update_handler[0].arn
+  starting_position      = "LATEST"
+  batch_size             = 100
+  maximum_batching_window_in_seconds = 60
+  
+  filter_criteria {
+    filter {
+      pattern = jsonencode({
+        "dynamodb": {
+          "Keys": {
+            "type": {
+              "S": ["schedule", "period"]
+            }
+          }
+        }
+      })
+    }
+    
+    filter {
+      pattern = jsonencode({
+        "eventName": ["INSERT", "MODIFY"]
+      })
+    }
+  }
+}
+
+# ASG Orchestrator CloudWatch Event Rule
+resource "aws_cloudwatch_event_rule" "asg_orchestrator_rule" {
+  count               = var.schedule_asgs ? 1 : 0
+  name                = "${var.stack_name}-ASGOrchestratorRule"
+  description         = "Instance Scheduler - Rule to trigger scheduling for AutoScaling Groups version ${local.solution_version}"
+  schedule_expression = "rate(1 hour)"
+  state               = "ENABLED"
+  tags                = var.tags
+}
+
+# ASG Orchestrator CloudWatch Event Target
+resource "aws_cloudwatch_event_target" "asg_orchestrator_target" {
+  count     = var.schedule_asgs ? 1 : 0
+  rule      = aws_cloudwatch_event_rule.asg_orchestrator_rule[0].name
+  target_id = "Target0"
+  arn       = aws_lambda_function.asg_orchestrator[0].arn
+  input     = "{}"
+  
+  retry_policy {
+    maximum_retry_attempts = 5
+  }
+}
+
+# ASG Orchestrator Lambda Permission for CloudWatch Events
+resource "aws_lambda_permission" "asg_orchestrator_event_permission" {
+  count         = var.schedule_asgs ? 1 : 0
+  statement_id  = "AllowExecutionFromCloudWatchEvents"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.asg_orchestrator[0].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.asg_orchestrator_rule[0].arn
+}
+
+output "scheduling_orchestrator_arn" {
+  description = "ARN of the scheduling orchestrator Lambda"
+  value       = aws_lambda_function.scheduling_orchestrator.arn
+}
+
+output "scheduling_orchestrator_name" {
+  description = "Name of the scheduling orchestrator Lambda"
+  value       = aws_lambda_function.scheduling_orchestrator.function_name
+}
+
+output "scheduling_request_handler_arn" {
+  description = "ARN of the scheduling request handler Lambda"
+  value       = aws_lambda_function.scheduling_request_handler.arn
+}
+
+output "scheduling_request_handler_name" {
+  description = "Name of the scheduling request handler Lambda"
+  value       = aws_lambda_function.scheduling_request_handler.function_name
+}
+
+output "asg_handler_arn" {
+  description = "ARN of the ASG handler Lambda"
+  value       = var.schedule_asgs ? aws_lambda_function.asg_handler[0].arn : ""
+}
+
+output "asg_handler_name" {
+  description = "Name of the ASG handler Lambda"
+  value       = var.schedule_asgs ? aws_lambda_function.asg_handler[0].function_name : ""
+}

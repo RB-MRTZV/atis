@@ -1,0 +1,146 @@
+# DynamoDB tables for Instance Scheduler
+
+variable "kms_key_arn" {
+  description = "ARN of the KMS key to use for encryption"
+  type        = string
+}
+
+variable "deletion_protection" {
+  description = "Whether DynamoDB tables should be protected from deletion"
+  type        = bool
+  default     = true
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+# State table for tracking instance states
+resource "aws_dynamodb_table" "state_table" {
+  name             = "InstanceSchedulerState"
+  billing_mode     = "PAY_PER_REQUEST"
+  hash_key         = "service"
+  range_key        = "account-region"
+  deletion_protection_enabled = var.deletion_protection
+
+  attribute {
+    name = "service"
+    type = "S"
+  }
+
+  attribute {
+    name = "account-region"
+    type = "S"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = var.kms_key_arn
+  }
+
+  tags = var.tags
+}
+
+# Configuration table for schedules
+resource "aws_dynamodb_table" "config_table" {
+  name             = "InstanceSchedulerConfig"
+  billing_mode     = "PAY_PER_REQUEST"
+  hash_key         = "type"
+  range_key        = "name"
+  deletion_protection_enabled = var.deletion_protection
+  
+  attribute {
+    name = "type"
+    type = "S"
+  }
+
+  attribute {
+    name = "name"
+    type = "S"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = var.kms_key_arn
+  }
+
+  stream_enabled   = true
+  stream_view_type = "KEYS_ONLY"
+
+  tags = var.tags
+}
+
+# Maintenance window table for SSM maintenance windows
+resource "aws_dynamodb_table" "maintenance_window_table" {
+  name             = "InstanceSchedulerMaintenanceWindows"
+  billing_mode     = "PAY_PER_REQUEST"
+  hash_key         = "account-region"
+  range_key        = "name-id"
+  deletion_protection_enabled = var.deletion_protection
+
+  attribute {
+    name = "account-region"
+    type = "S"
+  }
+
+  attribute {
+    name = "name-id"
+    type = "S"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = var.kms_key_arn
+  }
+
+  tags = var.tags
+}
+
+output "state_table_arn" {
+  description = "ARN of the state table"
+  value       = aws_dynamodb_table.state_table.arn
+}
+
+output "state_table_name" {
+  description = "Name of the state table"
+  value       = aws_dynamodb_table.state_table.name
+}
+
+output "config_table_arn" {
+  description = "ARN of the config table"
+  value       = aws_dynamodb_table.config_table.arn
+}
+
+output "config_table_name" {
+  description = "Name of the config table"
+  value       = aws_dynamodb_table.config_table.name
+}
+
+output "config_table_stream_arn" {
+  description = "ARN of the config table stream"
+  value       = aws_dynamodb_table.config_table.stream_arn
+}
+
+output "maintenance_window_table_arn" {
+  description = "ARN of the maintenance window table"
+  value       = aws_dynamodb_table.maintenance_window_table.arn
+}
+
+output "maintenance_window_table_name" {
+  description = "Name of the maintenance window table"
+  value       = aws_dynamodb_table.maintenance_window_table.name
+}

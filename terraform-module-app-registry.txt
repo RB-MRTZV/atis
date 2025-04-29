@@ -1,0 +1,39 @@
+# AWS Service Catalog App Registry module for Instance Scheduler
+
+variable "solution_id" {
+  description = "Solution ID"
+  type        = string
+}
+
+variable "solution_version" {
+  description = "Solution version"
+  type        = string
+}
+
+variable "solution_name" {
+  description = "Solution name"
+  type        = string
+}
+
+variable "application_type" {
+  description = "Application type"
+  type        = string
+}
+
+# Create App Registry application
+resource "aws_servicecatalogappregistry_application" "instance_scheduler" {
+  name        = "${var.solution_name}-${data.aws_region.current.name}-${data.aws_caller_identity.current.account_id}-${terraform.workspace}"
+  description = "Service Catalog application to track and manage all your resources for the solution ${var.solution_name}"
+  
+  tags = {
+    "Solutions:ApplicationType" = var.application_type
+    "Solutions:SolutionID"      = var.solution_id
+    "Solutions:SolutionName"    = var.solution_name
+    "Solutions:SolutionVersion" = var.solution_version
+  }
+}
+
+output "application_tag_value" {
+  description = "Application tag value for resources"
+  value       = aws_servicecatalogappregistry_application.instance_scheduler.arn
+}

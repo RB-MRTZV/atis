@@ -1,0 +1,160 @@
+# Main Terraform configuration for AWS Instance Scheduler
+
+# Create App Registry for the solution
+module "app_registry" {
+  source = "./modules/app_registry"
+  
+  solution_id         = local.solution_id
+  solution_version    = local.solution_version
+  solution_name       = local.app_registry_name
+  application_type    = local.app_registry_application_type
+}
+
+# Create KMS key for encryption
+module "kms" {
+  source = "./modules/kms"
+  
+  stack_name          = local.stack_name
+  deletion_protection = local.ddb_deletion_protection_condition
+  tags                = merge(local.common_tags, {
+    awsApplication = module.app_registry.application_tag_value
+  })
+}
+
+# Create SNS topic for notifications
+module "sns" {
+  source = "./modules/sns"
+  
+  kms_key_arn = module.kms.key_arn
+  tags        = merge(local.common_tags, {
+    awsApplication = module.app_registry.application_tag_value
+  })
+}
+
+# Create CloudWatch log group
+module "cloudwatch" {
+  source = "./modules/cloudwatch"
+  
+  stack_name                      = local.stack_name
+  log_retention_days              = var.log_retention_days
+  scheduling_active               = local.scheduling_active_condition
+  scheduler_frequency             = var.scheduler_frequency
+  scheduler_cron_expression       = local.scheduler_cron_expression
+  scheduler_orchestrator_lambda_arn = module.lambda.scheduling_orchestrator_arn
+  tags                            = merge(local.common_tags, {
+    awsApplication = module.app_registry.application_tag_value
+  })
+  
+  depends_on = [module.lambda]
+}
+
+# Create DynamoDB tables
+module "dynamodb" {
+  source = "./modules/dynamodb"
+  
+  kms_key_arn        = module.kms.key_arn
+  deletion_protection = local.ddb_deletion_protection_condition
+  tags               = merge(local.common_tags, {
+    awsApplication = module.app_registry.application_tag_value
+  })
+}
+
+# Create IAM roles and policies
+module "iam" {
+  source = "./modules/iam"
+  
+  namespace                    = var.namespace
+  stack_name                   = local.stack_name
+  kms_key_arn                  = module.kms.key_arn
+  sns_topic_arn                = module.sns.topic_arn
+  log_group_arn                = module.cloudwatch.scheduler_log_group_arn
+  config_table_arn             = module.dynamodb.config_table_arn
+  state_table_arn              = module.dynamodb.state_table_arn
+  maintenance_window_table_arn = module.dynamodb.maintenance_window_table_arn
+  enable_ec2_service           = local.schedule_ec2_condition
+  enable_rds_service           = local.schedule_rds_condition
+  enable_rds_clusters          = local.enable_rds_cluster_condition
+  create_rds_snapshot          = local.create_rds_snapshot_condition
+  kms_key_arns_list            = local.kms_key_arns_list
+  tags                         = merge(local.common_tags, {
+    awsApplication = module.app_registry.application_tag_value
+  })
+}
+
+# Create Lambda functions
+module "lambda" {
+  source = "./modules/lambda"
+  
+  stack_name                      = local.stack_name
+  namespace                       = var.namespace
+  s3_bucket                       = local.s3_bucket
+  s3_key                          = local.s3_key
+  memory_size                     = var.memory_size
+  asg_memory_size                 = var.asg_memory_size
+  orchestrator_memory_size        = var.orchestrator_memory_size
+  scheduler_orchestrator_role_arn = module.iam.scheduler_orchestrator_role_arn
+  scheduling_request_handler_role_arn = module.iam.scheduling_request_handler_role_arn
+  asg_role_arn                    = module.iam.asg_role_arn
+  log_group_name                  = module.cloudwatch.scheduler_log_group_name
+  sns_topic_arn                   = module.sns.topic_arn
+  config_table_name               = module.dynamodb.config_table_name
+  state_table_name                = module.dynamodb.state_table_name
+  maintenance_window_table_name   = module.dynamodb.maintenance_window_table_name
+  config_table_stream_arn         = module.dynamodb.config_table_stream_arn
+  send_anonymous_data             = local.anonymized_metrics_enabled
+  trace_enabled                   = local.trace_condition
+  scheduling_active               = local.scheduling_active_condition
+  schedule_lambda_account         = local.schedule_lambda_account_condition
+  scheduler_frequency             = var.scheduler_frequency
+  default_timezone                = var.default_timezone
+  tag_name                        = var.tag_name
+  started_tags                    = var.started_tags
+  stopped_tags                    = var.stopped_tags
+  schedule_regions                = local.regions_list
+  enable_ssm_maintenance_windows  = local.enable_ssm_maintenance_windows
+  schedule_ec2                    = local.schedule_ec2_condition
+  schedule_rds                    = local.schedule_rds_condition
+  enable_rds_clusters             = local.enable_rds_cluster_condition
+  schedule_neptune                = local.schedule_neptune_condition
+  schedule_docdb                  = local.schedule_docdb_condition
+  create_rds_snapshot             = local.create_rds_snapshot_condition
+  using_aws_organizations         = local.using_aws_organizations_condition
+  ops_monitoring                  = local.ops_monitoring_condition
+  schedule_asgs                   = local.schedule_asgs_condition
+  asg_scheduled_tag_key           = var.asg_scheduled_tag_key
+  asg_rule_prefix                 = var.asg_rule_prefix
+  metrics_uuid                    = random_uuid.metrics_uuid.result
+  tags                            = merge(local.common_tags, {
+    awsApplication = module.app_registry.application_tag_value
+  })
+}
+
+# Service Configuration Helper Resource
+resource "null_resource" "scheduler_config_helper" {
+  triggers = {
+    stack_id = var.namespace
+    remote_account_ids = var.principals
+    log_retention_days = var.log_retention_days
+  }
+  
+  depends_on = [
+    module.cloudwatch,
+    module.dynamodb,
+    module.iam,
+    module.kms,
+    module.lambda,
+    module.sns
+  ]
+}
+
+# Create the operational metrics dashboard if monitoring is enabled
+resource "aws_cloudwatch_dashboard" "operational_insights_dashboard" {
+  count          = local.ops_monitoring_condition ? 1 : 0
+  dashboard_name = "${local.stack_name}-${var.namespace}-Operational-Insights-Dashboard"
+  dashboard_body = templatefile("${path.module}/templates/operational_dashboard.json.tpl", {
+    aws_region = data.aws_region.current.name
+    stack_name = local.stack_name
+    scheduler_frequency = var.scheduler_frequency
+    metrics_interval_seconds = local.metrics_interval_seconds
+  })
+}

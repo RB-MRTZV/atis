@@ -1,0 +1,265 @@
+# Configuration parameters for AWS Instance Scheduler
+
+variable "tag_name" {
+  type        = string
+  default     = "Schedule"
+  description = "The tag key Instance Scheduler will read to determine the schedule for a resource. The value of the tag with this key on a resource specifies the name of the schedule."
+  validation {
+    condition     = length(var.tag_name) >= 1 && length(var.tag_name) <= 127
+    error_message = "The tag name must be between 1 and 127 characters long."
+  }
+}
+
+variable "scheduler_frequency" {
+  type        = number
+  default     = 5
+  description = "Interval in minutes between scheduler executions. For EC2 and RDS"
+  validation {
+    condition     = contains([1, 2, 5, 10, 15, 30, 60], var.scheduler_frequency)
+    error_message = "Scheduler frequency must be one of: 1, 2, 5, 10, 15, 30, or 60 minutes."
+  }
+}
+
+variable "default_timezone" {
+  type        = string
+  default     = "UTC"
+  description = "Default IANA time zone identifier used by schedules that do not specify a time zone."
+  # Note: In the CloudFormation template, there's a huge list of allowed timezones
+  # For Terraform, we'd use a validation rule with regex instead of listing all values
+  validation {
+    condition     = can(regex("^(Africa|America|Antarctica|Asia|Atlantic|Australia|Canada|Europe|GMT|Indian|Pacific|US|UTC)(/[A-Za-z_]+)*$", var.default_timezone))
+    error_message = "The timezone must be a valid IANA time zone identifier."
+  }
+}
+
+variable "scheduling_active" {
+  type        = string
+  default     = "Yes"
+  description = "Set to \"No\" to disable scheduling for all services."
+  validation {
+    condition     = contains(["Yes", "No"], var.scheduling_active)
+    error_message = "The scheduling_active value must be either \"Yes\" or \"No\"."
+  }
+}
+
+variable "schedule_ec2" {
+  type        = string
+  default     = "Enabled"
+  description = "Enable scheduling EC2 instances."
+  validation {
+    condition     = contains(["Enabled", "Disabled"], var.schedule_ec2)
+    error_message = "The schedule_ec2 value must be either \"Enabled\" or \"Disabled\"."
+  }
+}
+
+variable "schedule_rds" {
+  type        = string
+  default     = "Enabled"
+  description = "Enable scheduling individual RDS instances (not clusters)."
+  validation {
+    condition     = contains(["Enabled", "Disabled"], var.schedule_rds)
+    error_message = "The schedule_rds value must be either \"Enabled\" or \"Disabled\"."
+  }
+}
+
+variable "enable_rds_cluster_scheduling" {
+  type        = string
+  default     = "Enabled"
+  description = "Enable scheduling RDS clusters (multi-AZ and Aurora)."
+  validation {
+    condition     = contains(["Enabled", "Disabled"], var.enable_rds_cluster_scheduling)
+    error_message = "The enable_rds_cluster_scheduling value must be either \"Enabled\" or \"Disabled\"."
+  }
+}
+
+variable "schedule_neptune" {
+  type        = string
+  default     = "Enabled"
+  description = "Enable scheduling Neptune clusters."
+  validation {
+    condition     = contains(["Enabled", "Disabled"], var.schedule_neptune)
+    error_message = "The schedule_neptune value must be either \"Enabled\" or \"Disabled\"."
+  }
+}
+
+variable "schedule_docdb" {
+  type        = string
+  default     = "Enabled"
+  description = "Enable scheduling DocumentDB clusters."
+  validation {
+    condition     = contains(["Enabled", "Disabled"], var.schedule_docdb)
+    error_message = "The schedule_docdb value must be either \"Enabled\" or \"Disabled\"."
+  }
+}
+
+variable "schedule_asgs" {
+  type        = string
+  default     = "Enabled"
+  description = "Enable scheduling AutoScaling Groups"
+  validation {
+    condition     = contains(["Enabled", "Disabled"], var.schedule_asgs)
+    error_message = "The schedule_asgs value must be either \"Enabled\" or \"Disabled\"."
+  }
+}
+
+variable "started_tags" {
+  type        = string
+  default     = "InstanceScheduler-LastAction=Started By {scheduler} {year}-{month}-{day} {hour}:{minute} {timezone}"
+  description = "Comma-separated list of tag keys and values of the format key=value, key=value,... that are set on started instances. Leave blank to disable."
+}
+
+variable "stopped_tags" {
+  type        = string
+  default     = "InstanceScheduler-LastAction=Stopped By {scheduler} {year}-{month}-{day} {hour}:{minute} {timezone}"
+  description = "Comma-separated list of tag keys and values of the format key=value, key=value,... that are set on stopped instances. Leave blank to disable."
+}
+
+variable "enable_ssm_maintenance_windows" {
+  type        = string
+  default     = "No"
+  description = "Allow schedules to specify a maintenance window name. Instance Scheduler will ensure the instance is running during that maintenance window."
+  validation {
+    condition     = contains(["Yes", "No"], var.enable_ssm_maintenance_windows)
+    error_message = "The enable_ssm_maintenance_windows value must be either \"Yes\" or \"No\"."
+  }
+}
+
+variable "kms_key_arns" {
+  type        = string
+  default     = ""
+  description = "comma-separated list of kms arns to grant Instance Scheduler kms:CreateGrant permissions to provide the EC2 service with Decrypt permissions for encrypted EBS volumes. This allows the scheduler to start EC2 instances with attached encrypted EBS volumes. provide just (*) to give limited access to all kms keys, leave blank to disable."
+}
+
+variable "create_rds_snapshot" {
+  type        = string
+  default     = "No"
+  description = "Create snapshots before stopping RDS instances (not clusters)."
+  validation {
+    condition     = contains(["Yes", "No"], var.create_rds_snapshot)
+    error_message = "The create_rds_snapshot value must be either \"Yes\" or \"No\"."
+  }
+}
+
+variable "asg_scheduled_tag_key" {
+  type        = string
+  default     = "scheduled"
+  description = "Key for the tag Instance Scheduler will add to scheduled AutoScaling Groups"
+}
+
+variable "asg_rule_prefix" {
+  type        = string
+  default     = "is-"
+  description = "The prefix Instance Scheduler will use when naming Scheduled Scaling actions for AutoScaling Groups. Actions with this prefix will be added and removed by Instance Scheduler as needed."
+}
+
+variable "using_aws_organizations" {
+  type        = string
+  default     = "No"
+  description = "Deploy resources to enable automatic spoke stack registration using AWS Organizations."
+  validation {
+    condition     = contains(["Yes", "No"], var.using_aws_organizations)
+    error_message = "The using_aws_organizations value must be either \"Yes\" or \"No\"."
+  }
+}
+
+variable "namespace" {
+  type        = string
+  default     = "default"
+  description = "Unique identifier per deployment. Cannot contain spaces."
+  validation {
+    condition     = !can(regex("\\s", var.namespace))
+    error_message = "The namespace cannot contain spaces."
+  }
+}
+
+variable "principals" {
+  type        = string
+  default     = ""
+  description = "(Required) If using AWS Organizations, provide the Organization ID. Eg. o-xxxxyyy. Else, provide a comma-separated list of spoke account ids to schedule. Eg.: 1111111111, 2222222222 or {param: ssm-param-name}"
+}
+
+variable "regions" {
+  type        = string
+  default     = ""
+  description = "Comma-separated List of regions in which resources should be scheduled. Leave blank for current region only."
+}
+
+variable "schedule_lambda_account" {
+  type        = string
+  default     = "Yes"
+  description = "Enable scheduling in this account."
+  validation {
+    condition     = contains(["Yes", "No"], var.schedule_lambda_account)
+    error_message = "The schedule_lambda_account value must be either \"Yes\" or \"No\"."
+  }
+}
+
+variable "log_retention_days" {
+  type        = number
+  default     = 30
+  description = "Retention period in days for logs."
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.log_retention_days)
+    error_message = "Log retention days must be one of the allowed values: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653."
+  }
+}
+
+variable "trace" {
+  type        = string
+  default     = "No"
+  description = "Enable debug-level logging in CloudWatch Logs."
+  validation {
+    condition     = contains(["Yes", "No"], var.trace)
+    error_message = "The trace value must be either \"Yes\" or \"No\"."
+  }
+}
+
+variable "ops_monitoring" {
+  type        = string
+  default     = "Enabled"
+  description = "Deploy operational metrics and an Ops Monitoring Dashboard to Cloudwatch"
+  validation {
+    condition     = contains(["Enabled", "Disabled"], var.ops_monitoring)
+    error_message = "The ops_monitoring value must be either \"Enabled\" or \"Disabled\"."
+  }
+}
+
+variable "memory_size" {
+  type        = number
+  default     = 128
+  description = "Memory size of the Lambda function that schedules EC2 and RDS resources. Increase if you are experiencing high memory usage or timeouts."
+  validation {
+    condition     = contains([128, 384, 512, 640, 768, 896, 1024, 1152, 1280, 1408, 1536], var.memory_size)
+    error_message = "Memory size must be one of: 128, 384, 512, 640, 768, 896, 1024, 1152, 1280, 1408, 1536."
+  }
+}
+
+variable "asg_memory_size" {
+  type        = number
+  default     = 128
+  description = "Memory size of the Lambda function that schedules ASG resources. Increase if you are experiencing high memory usage or timeouts."
+  validation {
+    condition     = contains([128, 384, 512, 640, 768, 896, 1024, 1152, 1280, 1408, 1536], var.asg_memory_size)
+    error_message = "ASG memory size must be one of: 128, 384, 512, 640, 768, 896, 1024, 1152, 1280, 1408, 1536."
+  }
+}
+
+variable "orchestrator_memory_size" {
+  type        = number
+  default     = 128
+  description = "Memory size of the Lambda functions that coordinate multi-account, multi-region scheduling for the other scheduling lambdas. Increase if you are experiencing high memory usage or timeouts."
+  validation {
+    condition     = contains([128, 384, 512, 640, 768, 896, 1024, 1152, 1280, 1408, 1536], var.orchestrator_memory_size)
+    error_message = "Orchestrator memory size must be one of: 128, 384, 512, 640, 768, 896, 1024, 1152, 1280, 1408, 1536."
+  }
+}
+
+variable "ddb_deletion_protection" {
+  type        = string
+  default     = "Enabled"
+  description = "Enable deletion protection for DynamoDB tables used by the solution. This will cause the tables to be retained when deleting this stack. To delete the tables when deleting this stack, first disable this parameter."
+  validation {
+    condition     = contains(["Enabled", "Disabled"], var.ddb_deletion_protection)
+    error_message = "The ddb_deletion_protection value must be either \"Enabled\" or \"Disabled\"."
+  }
+}
