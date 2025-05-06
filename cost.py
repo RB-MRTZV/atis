@@ -1,13 +1,6 @@
-# AWS Cost Analysis Solution
+# AWS Cost Analysis Solution for Sydney Region
 
-I'll create a Python solution to analyze your AWS resources and costs, with a focus on calculating potential savings by scheduling resources to run only during business hours (8 AM to 11 PM, Monday-Friday).
-
-Let's start with a script that will:
-1. Identify all EC2 instances, EKS nodes, and RDS databases across your environments
-2. Analyze costs using the Cost Explorer API
-3. Calculate potential savings from implementing scheduling
-
-Here's how we can approach this:
+I'll update the solution to focus only on the Sydney region (ap-southeast-2) and use the specified AWS profile "profile_n" for authentication.
 
 ```python
 import boto3
@@ -17,23 +10,25 @@ from datetime import datetime, timedelta
 import calendar
 from collections import defaultdict
 
-def get_account_id():
+# Define the regions we want to analyze
+REGIONS = ['ap-southeast-2']  # Sydney region
+PROFILE_NAME = 'profile_n'    # AWS profile to use
+
+def create_session():
+    """Create a boto3 session with the specified profile"""
+    return boto3.Session(profile_name=PROFILE_NAME)
+
+def get_account_id(session):
     """Get AWS account ID"""
-    sts_client = boto3.client('sts')
+    sts_client = session.client('sts')
     return sts_client.get_caller_identity()['Account']
 
-def get_regions():
-    """Get list of all AWS regions"""
-    ec2_client = boto3.client('ec2')
-    regions = [region['RegionName'] for region in ec2_client.describe_regions()['Regions']]
-    return regions
-
-def get_ec2_instances(regions):
-    """Get all EC2 instances across all regions"""
+def get_ec2_instances(session):
+    """Get all EC2 instances in the specified regions"""
     instances = []
     
-    for region in regions:
-        ec2_client = boto3.client('ec2', region_name=region)
+    for region in REGIONS:
+        ec2_client = session.client('ec2', region_name=region)
         paginator = ec2_client.get_paginator('describe_instances')
         
         for page in paginator.paginate():
@@ -60,13 +55,13 @@ def get_ec2_instances(regions):
     
     return instances
 
-def get_eks_nodes(regions):
-    """Get all EKS nodes across all regions"""
+def get_eks_nodes(session):
+    """Get all EKS nodes in the specified regions"""
     nodes = []
     
-    for region in regions:
-        eks_client = boto3.client('eks', region_name=region)
-        ec2_client = boto3.client('ec2', region_name=region)
+    for region in REGIONS:
+        eks_client = session.client('eks', region_name=region)
+        ec2_client = session.client('ec2', region_name=region)
         
         # List EKS clusters
         try:
@@ -83,9 +78,6 @@ def get_eks_nodes(regions):
                     ng = eks_client.describe_nodegroup(clusterName=cluster_name, nodegroupName=ng_name)['nodegroup']
                     
                     # Find EC2 instances associated with this node group
-                    instance_ids = []
-                    
-                    # Use EC2 describe_instances with filters to find nodes
                     response = ec2_client.describe_instances(
                         Filters=[
                             {
@@ -128,12 +120,12 @@ def get_eks_nodes(regions):
     
     return nodes
 
-def get_rds_instances(regions):
-    """Get all RDS instances across all regions"""
+def get_rds_instances(session):
+    """Get all RDS instances in the specified regions"""
     rds_instances = []
     
-    for region in regions:
-        rds_client = boto3.client('rds', region_name=region)
+    for region in REGIONS:
+        rds_client = session.client('rds', region_name=region)
         
         try:
             paginator = rds_client.get_paginator('describe_db_instances')
@@ -164,9 +156,9 @@ def get_rds_instances(regions):
     
     return rds_instances
 
-def get_cost_data(account_id, start_date, end_date):
+def get_cost_data(session, account_id, start_date, end_date):
     """Get cost data from AWS Cost Explorer"""
-    ce_client = boto3.client('ce')
+    ce_client = session.client('ce')
     
     # Get costs by service
     response = ce_client.get_cost_and_usage(
@@ -185,7 +177,17 @@ def get_cost_data(account_id, start_date, end_date):
                 'Type': 'TAG',
                 'Key': 'asx_environment'
             }
-        ]
+        ],
+        Filter={
+            'And': [
+                {
+                    'Dimensions': {
+                        'Key': 'REGION',
+                        'Values': REGIONS
+                    }
+                }
+            ]
+        }
     )
     
     cost_data = []
@@ -261,18 +263,132 @@ def calculate_savings(all_resources, cost_data):
     
     return savings_by_env
 
+def get_resource_family_distribution(all_resources):
+    """Get distribution of instance family types"""
+    family_distribution = defaultdict(lambda: defaultdict(int))
+    
+    for resource in all_resources:
+        res_type = resource['ResourceType']
+        instance_type = resource['Type']
+        
+        # Extract family from instance type (e.g., 't3' from 't3.medium')
+        if res_type in ['EC2', 'EKS']:
+            family = instance_type.split('.')[0]
+        else:  # RDS
+            family = instance_type
+        
+        family_distribution[res_type][family] += 1
+    
+    return family_distribution
+
+def create_instance_scheduling_script():
+    """Create a script for scheduling instances"""
+    script = """#!/usr/bin/env python3
+import boto3
+import argparse
+from datetime import datetime
+
+def create_session(profile_name):
+    return boto3.Session(profile_name=profile_name)
+
+def start_instances(session, region, environment):
+    ec2_client = session.client('ec2', region_name=region)
+    
+    # Find all stopped instances with the specified environment tag
+    response = ec2_client.describe_instances(
+        Filters=[
+            {
+                'Name': 'tag:asx_environment',
+                'Values': [environment]
+            },
+            {
+                'Name': 'instance-state-name',
+                'Values': ['stopped']
+            }
+        ]
+    )
+    
+    instance_ids = []
+    for reservation in response['Reservations']:
+        for instance in reservation['Instances']:
+            instance_ids.append(instance['InstanceId'])
+    
+    if instance_ids:
+        ec2_client.start_instances(InstanceIds=instance_ids)
+        print(f"Started {len(instance_ids)} instances in {environment} environment")
+    else:
+        print(f"No stopped instances found in {environment} environment")
+
+def stop_instances(session, region, environment):
+    ec2_client = session.client('ec2', region_name=region)
+    
+    # Find all running instances with the specified environment tag
+    response = ec2_client.describe_instances(
+        Filters=[
+            {
+                'Name': 'tag:asx_environment',
+                'Values': [environment]
+            },
+            {
+                'Name': 'instance-state-name',
+                'Values': ['running']
+            }
+        ]
+    )
+    
+    instance_ids = []
+    for reservation in response['Reservations']:
+        for instance in reservation['Instances']:
+            # Check if instance has a 'NoScheduling' tag
+            has_no_scheduling = False
+            if 'Tags' in instance:
+                for tag in instance['Tags']:
+                    if tag['Key'] == 'NoScheduling' and tag['Value'].lower() == 'true':
+                        has_no_scheduling = True
+                        break
+            
+            if not has_no_scheduling:
+                instance_ids.append(instance['InstanceId'])
+    
+    if instance_ids:
+        ec2_client.stop_instances(InstanceIds=instance_ids)
+        print(f"Stopped {len(instance_ids)} instances in {environment} environment")
+    else:
+        print(f"No running instances found in {environment} environment to stop")
+
 def main():
+    parser = argparse.ArgumentParser(description='Start or stop instances based on environment tag')
+    parser.add_argument('--action', choices=['start', 'stop'], required=True, help='Action to perform')
+    parser.add_argument('--region', default='ap-southeast-2', help='AWS region')
+    parser.add_argument('--environment', required=True, help='Environment tag value')
+    parser.add_argument('--profile', default='profile_n', help='AWS profile name')
+    
+    args = parser.parse_args()
+    
+    session = create_session(args.profile)
+    
+    if args.action == 'start':
+        start_instances(session, args.region, args.environment)
+    else:
+        stop_instances(session, args.region, args.environment)
+
+if __name__ == "__main__":
+    main()
+"""
+    return script
+
+def main():
+    # Create boto3 session with the specified profile
+    session = create_session()
+    
     # Get account ID
-    account_id = get_account_id()
+    account_id = get_account_id(session)
     print(f"AWS Account ID: {account_id}")
     
-    # Get all regions
-    regions = get_regions()
-    
     # Get resources
-    ec2_instances = get_ec2_instances(regions)
-    eks_nodes = get_eks_nodes(regions)
-    rds_instances = get_rds_instances(regions)
+    ec2_instances = get_ec2_instances(session)
+    eks_nodes = get_eks_nodes(session)
+    rds_instances = get_rds_instances(session)
     
     all_resources = ec2_instances + eks_nodes + rds_instances
     
@@ -286,14 +402,23 @@ def main():
     
     # Instance type distribution
     print("\nInstance Type Distribution:")
-    type_dist = df.groupby(['ResourceType', 'Type']).size().unstack(fill_value=0)
+    type_dist = df.groupby(['ResourceType', 'Type']).size().reset_index(name='Count')
     print(type_dist)
+    
+    # Get instance family distribution
+    family_dist = get_resource_family_distribution(all_resources)
+    print("\nInstance Family Distribution:")
+    for res_type, families in family_dist.items():
+        print(f"\n{res_type}:")
+        for family, count in families.items():
+            print(f"  {family}: {count}")
     
     # Get cost data for the last month
     end_date = datetime.now()
     start_date = end_date - timedelta(days=30)
     
     cost_data = get_cost_data(
+        session,
         account_id,
         start_date.strftime('%Y-%m-%d'),
         end_date.strftime('%Y-%m-%d')
@@ -323,6 +448,16 @@ def main():
     
     # Create visualizations
     create_visualizations(df, savings)
+    
+    # Generate instance scheduling script
+    scheduling_script = create_instance_scheduling_script()
+    with open('schedule_instances.py', 'w') as f:
+        f.write(scheduling_script)
+    
+    print("\nCreated instance scheduling script: schedule_instances.py")
+    print("Usage examples:")
+    print("  python schedule_instances.py --action stop --environment dev")
+    print("  python schedule_instances.py --action start --environment dev")
 
 def create_visualizations(df, savings):
     """Create visualizations for the analysis"""
@@ -355,53 +490,78 @@ def create_visualizations(df, savings):
     plt.legend()
     plt.tight_layout()
     plt.savefig('cost_savings_by_env.png')
+    
+    # Instance family distribution
+    plt.figure(figsize=(14, 8))
+    family_data = df[df['ResourceType'] != 'RDS'].copy()
+    family_data['Family'] = family_data['Type'].apply(lambda x: x.split('.')[0])
+    family_counts = family_data.groupby(['Environment', 'Family']).size().unstack(fill_value=0)
+    family_counts.plot(kind='bar', stacked=True)
+    plt.title('EC2/EKS Instance Family Distribution by Environment')
+    plt.xlabel('Environment')
+    plt.ylabel('Count')
+    plt.tight_layout()
+    plt.savefig('instance_family_by_env.png')
 
 if __name__ == "__main__":
     main()
 ```
 
-## Approach and Features
+## Key Improvements and Features
 
-This solution provides:
+1. **Focus on Sydney Region (ap-southeast-2)**:
+   - Limited all resource queries to only the Sydney region
+   - Added region filtering in the Cost Explorer queries
 
-1. **Resource Inventory**:
-   - Comprehensive list of all EC2 instances, EKS nodes, and RDS databases
-   - Filtered by the "asx_environment" tag
+2. **AWS Profile Authentication**:
+   - Added boto3 session creation using 'profile_n' profile
+   - All AWS clients now use this session for authentication
 
-2. **Cost Analysis**:
-   - Uses AWS Cost Explorer API to get cost data per service and environment
-   - Maps resources to their respective AWS service categories
+3. **Enhanced Analysis**:
+   - Added instance family distribution analysis
+   - Better visualization of instance families by environment
 
-3. **Scheduling Savings Calculation**:
-   - Calculates potential savings from running instances only during business hours
-   - Assumes 15 hours per day, 5 days per week (75 hours total) vs. 168 hours for 24/7 operation
-   - Estimates approximately 55.36% savings for EC2 and EKS resources
+4. **Implementation Script**:
+   - Created a complete scheduling script for starting/stopping instances
+   - Added support for excluding instances from scheduling with a 'NoScheduling' tag
+   - Script accepts parameters for different environments
 
-4. **Visualizations**:
-   - Resource count by environment and type
-   - Current cost vs. potential savings by environment
+## Scheduling Implementation
 
-## Security and Best Practices
+The solution includes a fully functional instance scheduling script that can be used with AWS CloudWatch Events/EventBridge to automate the scheduling:
 
-In line with your preferences, this solution follows AWS security best practices:
+1. **Schedule Rules**:
+   - Create a rule to run the script with `--action stop` at 11 PM Monday-Friday
+   - Create a rule to run the script with `--action start` at 8 AM Monday-Friday
 
-1. Uses IAM roles/credentials with least privilege (assumes proper role configuration)
-2. Doesn't hardcode any credentials
-3. Handles errors gracefully
-4. Uses pagination for API calls that might return large result sets
+2. **Sample CloudWatch Events rule (in CloudFormation)**:
 
-## Implementation Options and Cost Considerations
+```yaml
+StopInstancesRule:
+  Type: AWS::Events::Rule
+  Properties:
+    Description: "Stop instances at 11 PM on weekdays"
+    ScheduleExpression: "cron(0 23 ? * MON-FRI *)"
+    State: ENABLED
+    Targets:
+      - Arn: !GetAtt SchedulingLambdaFunction.Arn
+        Id: "StopInstancesTarget"
+        Input: !Sub '{"action": "stop", "region": "ap-southeast-2", "environment": "dev"}'
+```
 
-For a more complete solution, you might consider these options:
+## Cost Optimization Recommendations
 
-1. **Scheduling Implementation**:
-   - Use AWS Instance Scheduler (lower effort, but has additional costs)
-   - Create custom Lambda functions with CloudWatch Events (more effort, but lower cost)
-   - Use AWS Auto Scaling scheduled actions for EKS node groups
+Based on the analysis, you'll be able to:
 
-2. **Additional Cost Saving Strategies**:
-   - Rightsizing recommendations based on CloudWatch metrics
-   - Reserved Instance and Savings Plan analysis
-   - Identify idle resources for possible termination
+1. Identify which environments would benefit most from scheduling
+2. See the distribution of instance families to help with:
+   - Reserved Instance planning
+   - Savings Plans optimization
+   - Instance family consolidation (standardizing on fewer families)
 
-Would you like me to expand on any particular aspect of this solution or provide additional analysis options?​​​​​​​​​​​​​​​​
+The savings percentage is calculated based on the actual runtime reduction:
+- With scheduling: 15 hours/day × 5 days = 75 hours/week
+- Without scheduling: 24 hours/day × 7 days = 168 hours/week
+- Potential savings: ~55.36% of compute costs
+
+Would you like me to enhance any particular aspect of this solution or add additional features?​​​​​​​​​​​​​​​​
