@@ -1,16 +1,14 @@
-# AWS Cost Analysis Solution for Sydney Region
+# AWS Cost Analysis - Focus on Environment Expenses
 
-I'll update the solution to focus only on the Sydney region (ap-southeast-2) and use the specified AWS profile "profile_n" for authentication.
+Let's focus on finding the expenses per environment first. Here's a streamlined Python script that uses the specified profile and focuses only on the Sydney region for now:
 
 ```python
 import boto3
 import pandas as pd
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-import calendar
 from collections import defaultdict
 
-# Define the regions we want to analyze
+# Define the regions and profile
 REGIONS = ['ap-southeast-2']  # Sydney region
 PROFILE_NAME = 'profile_n'    # AWS profile to use
 
@@ -68,15 +66,10 @@ def get_eks_nodes(session):
             clusters = eks_client.list_clusters()['clusters']
             
             for cluster_name in clusters:
-                # Get cluster details
-                cluster = eks_client.describe_cluster(name=cluster_name)['cluster']
-                
                 # Get node groups
                 node_groups = eks_client.list_nodegroups(clusterName=cluster_name)['nodegroups']
                 
                 for ng_name in node_groups:
-                    ng = eks_client.describe_nodegroup(clusterName=cluster_name, nodegroupName=ng_name)['nodegroup']
-                    
                     # Find EC2 instances associated with this node group
                     response = ec2_client.describe_instances(
                         Filters=[
@@ -160,7 +153,7 @@ def get_cost_data(session, account_id, start_date, end_date):
     """Get cost data from AWS Cost Explorer"""
     ce_client = session.client('ce')
     
-    # Get costs by service
+    # Get costs by service and environment tag
     response = ce_client.get_cost_and_usage(
         TimePeriod={
             'Start': start_date,
@@ -209,7 +202,60 @@ def get_cost_data(session, account_id, start_date, end_date):
     
     return cost_data
 
-def calculate_savings(all_resources, cost_data):
+def get_cost_by_instance_type(session, account_id, start_date, end_date):
+    """Get cost data by instance type from AWS Cost Explorer"""
+    ce_client = session.client('ce')
+    
+    # Get costs by instance type
+    response = ce_client.get_cost_and_usage(
+        TimePeriod={
+            'Start': start_date,
+            'End': end_date
+        },
+        Granularity='MONTHLY',
+        Metrics=['UnblendedCost'],
+        GroupBy=[
+            {
+                'Type': 'DIMENSION',
+                'Key': 'INSTANCE_TYPE'
+            },
+            {
+                'Type': 'TAG',
+                'Key': 'asx_environment'
+            }
+        ],
+        Filter={
+            'And': [
+                {
+                    'Dimensions': {
+                        'Key': 'REGION',
+                        'Values': REGIONS
+                    }
+                }
+            ]
+        }
+    )
+    
+    cost_data = []
+    
+    for result in response['ResultsByTime']:
+        for group in result['Groups']:
+            instance_type = group['Keys'][0]
+            environment = group['Keys'][1].replace('asx_environment$', '') if '$' in group['Keys'][1] else 'untagged'
+            amount = float(group['Metrics']['UnblendedCost']['Amount'])
+            unit = group['Metrics']['UnblendedCost']['Unit']
+            
+            cost_data.append({
+                'InstanceType': instance_type,
+                'Environment': environment,
+                'Amount': amount,
+                'Unit': unit,
+                'Period': result['TimePeriod']['Start']
+            })
+    
+    return cost_data
+
+def calculate_savings_potential(all_resources, cost_data):
     """Calculate potential savings from scheduling resources"""
     # Calculate how many hours would be saved per week
     # Workday: 8 AM to 11 PM = 15 hours per day, 5 days = 75 hours
@@ -263,122 +309,9 @@ def calculate_savings(all_resources, cost_data):
     
     return savings_by_env
 
-def get_resource_family_distribution(all_resources):
-    """Get distribution of instance family types"""
-    family_distribution = defaultdict(lambda: defaultdict(int))
-    
-    for resource in all_resources:
-        res_type = resource['ResourceType']
-        instance_type = resource['Type']
-        
-        # Extract family from instance type (e.g., 't3' from 't3.medium')
-        if res_type in ['EC2', 'EKS']:
-            family = instance_type.split('.')[0]
-        else:  # RDS
-            family = instance_type
-        
-        family_distribution[res_type][family] += 1
-    
-    return family_distribution
-
-def create_instance_scheduling_script():
-    """Create a script for scheduling instances"""
-    script = """#!/usr/bin/env python3
-import boto3
-import argparse
-from datetime import datetime
-
-def create_session(profile_name):
-    return boto3.Session(profile_name=profile_name)
-
-def start_instances(session, region, environment):
-    ec2_client = session.client('ec2', region_name=region)
-    
-    # Find all stopped instances with the specified environment tag
-    response = ec2_client.describe_instances(
-        Filters=[
-            {
-                'Name': 'tag:asx_environment',
-                'Values': [environment]
-            },
-            {
-                'Name': 'instance-state-name',
-                'Values': ['stopped']
-            }
-        ]
-    )
-    
-    instance_ids = []
-    for reservation in response['Reservations']:
-        for instance in reservation['Instances']:
-            instance_ids.append(instance['InstanceId'])
-    
-    if instance_ids:
-        ec2_client.start_instances(InstanceIds=instance_ids)
-        print(f"Started {len(instance_ids)} instances in {environment} environment")
-    else:
-        print(f"No stopped instances found in {environment} environment")
-
-def stop_instances(session, region, environment):
-    ec2_client = session.client('ec2', region_name=region)
-    
-    # Find all running instances with the specified environment tag
-    response = ec2_client.describe_instances(
-        Filters=[
-            {
-                'Name': 'tag:asx_environment',
-                'Values': [environment]
-            },
-            {
-                'Name': 'instance-state-name',
-                'Values': ['running']
-            }
-        ]
-    )
-    
-    instance_ids = []
-    for reservation in response['Reservations']:
-        for instance in reservation['Instances']:
-            # Check if instance has a 'NoScheduling' tag
-            has_no_scheduling = False
-            if 'Tags' in instance:
-                for tag in instance['Tags']:
-                    if tag['Key'] == 'NoScheduling' and tag['Value'].lower() == 'true':
-                        has_no_scheduling = True
-                        break
-            
-            if not has_no_scheduling:
-                instance_ids.append(instance['InstanceId'])
-    
-    if instance_ids:
-        ec2_client.stop_instances(InstanceIds=instance_ids)
-        print(f"Stopped {len(instance_ids)} instances in {environment} environment")
-    else:
-        print(f"No running instances found in {environment} environment to stop")
-
-def main():
-    parser = argparse.ArgumentParser(description='Start or stop instances based on environment tag')
-    parser.add_argument('--action', choices=['start', 'stop'], required=True, help='Action to perform')
-    parser.add_argument('--region', default='ap-southeast-2', help='AWS region')
-    parser.add_argument('--environment', required=True, help='Environment tag value')
-    parser.add_argument('--profile', default='profile_n', help='AWS profile name')
-    
-    args = parser.parse_args()
-    
-    session = create_session(args.profile)
-    
-    if args.action == 'start':
-        start_instances(session, args.region, args.environment)
-    else:
-        stop_instances(session, args.region, args.environment)
-
-if __name__ == "__main__":
-    main()
-"""
-    return script
-
 def main():
     # Create boto3 session with the specified profile
+    print("Creating AWS session with profile: profile_n")
     session = create_session()
     
     # Get account ID
@@ -386,9 +319,17 @@ def main():
     print(f"AWS Account ID: {account_id}")
     
     # Get resources
+    print("\nFetching EC2 instances...")
     ec2_instances = get_ec2_instances(session)
+    print(f"Found {len(ec2_instances)} EC2 instances")
+    
+    print("\nFetching EKS nodes...")
     eks_nodes = get_eks_nodes(session)
+    print(f"Found {len(eks_nodes)} EKS nodes")
+    
+    print("\nFetching RDS instances...")
     rds_instances = get_rds_instances(session)
+    print(f"Found {len(rds_instances)} RDS instances")
     
     all_resources = ec2_instances + eks_nodes + rds_instances
     
@@ -397,25 +338,25 @@ def main():
     
     # Print resource counts
     print("\nResource Counts by Environment:")
-    env_counts = df.groupby(['Environment', 'ResourceType']).size().unstack(fill_value=0)
-    print(env_counts)
+    if not df.empty:
+        env_counts = df.groupby(['Environment', 'ResourceType']).size().unstack(fill_value=0)
+        print(env_counts)
+    else:
+        print("No resources found")
     
     # Instance type distribution
     print("\nInstance Type Distribution:")
-    type_dist = df.groupby(['ResourceType', 'Type']).size().reset_index(name='Count')
-    print(type_dist)
-    
-    # Get instance family distribution
-    family_dist = get_resource_family_distribution(all_resources)
-    print("\nInstance Family Distribution:")
-    for res_type, families in family_dist.items():
-        print(f"\n{res_type}:")
-        for family, count in families.items():
-            print(f"  {family}: {count}")
+    if not df.empty:
+        type_dist = df.groupby(['ResourceType', 'Type']).size().reset_index(name='Count')
+        print(type_dist)
+    else:
+        print("No resources found")
     
     # Get cost data for the last month
     end_date = datetime.now()
     start_date = end_date - timedelta(days=30)
+    
+    print(f"\nFetching cost data from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}...")
     
     cost_data = get_cost_data(
         session,
@@ -424,8 +365,56 @@ def main():
         end_date.strftime('%Y-%m-%d')
     )
     
+    # Print cost data by service and environment
+    print("\nCost Data by Service and Environment:")
+    cost_df = pd.DataFrame(cost_data)
+    
+    if not cost_df.empty:
+        service_env_cost = cost_df.pivot_table(
+            index='Environment', 
+            columns='Service', 
+            values='Amount', 
+            aggfunc='sum',
+            fill_value=0
+        )
+        print(service_env_cost)
+        
+        # Print total cost by environment
+        print("\nTotal Cost by Environment:")
+        total_by_env = cost_df.groupby('Environment')['Amount'].sum().reset_index()
+        for _, row in total_by_env.iterrows():
+            print(f"  {row['Environment']}: ${row['Amount']:.2f}")
+    else:
+        print("No cost data found")
+    
+    # Get cost data by instance type
+    print("\nFetching cost data by instance type...")
+    instance_cost_data = get_cost_by_instance_type(
+        session,
+        account_id,
+        start_date.strftime('%Y-%m-%d'),
+        end_date.strftime('%Y-%m-%d')
+    )
+    
+    # Print cost data by instance type and environment
+    print("\nCost Data by Instance Type and Environment:")
+    instance_cost_df = pd.DataFrame(instance_cost_data)
+    
+    if not instance_cost_df.empty:
+        instance_env_cost = instance_cost_df.pivot_table(
+            index='Environment', 
+            columns='InstanceType', 
+            values='Amount', 
+            aggfunc='sum',
+            fill_value=0
+        )
+        print(instance_env_cost)
+    else:
+        print("No instance type cost data found")
+    
     # Calculate potential savings
-    savings = calculate_savings(all_resources, cost_data)
+    print("\nCalculating potential savings...")
+    savings = calculate_savings_potential(all_resources, cost_data)
     
     # Print savings analysis
     print("\nPotential Savings Analysis:")
@@ -445,123 +434,44 @@ def main():
     print(f"\nTotal Current Monthly Cost: ${total_current_cost:.2f}")
     print(f"Total Potential Monthly Savings: ${total_potential_savings:.2f}")
     print(f"Overall Savings Percentage: {(total_potential_savings / total_current_cost * 100) if total_current_cost > 0 else 0:.2f}%")
-    
-    # Create visualizations
-    create_visualizations(df, savings)
-    
-    # Generate instance scheduling script
-    scheduling_script = create_instance_scheduling_script()
-    with open('schedule_instances.py', 'w') as f:
-        f.write(scheduling_script)
-    
-    print("\nCreated instance scheduling script: schedule_instances.py")
-    print("Usage examples:")
-    print("  python schedule_instances.py --action stop --environment dev")
-    print("  python schedule_instances.py --action start --environment dev")
-
-def create_visualizations(df, savings):
-    """Create visualizations for the analysis"""
-    # Resource count by environment and type
-    plt.figure(figsize=(12, 6))
-    env_type_counts = df.groupby(['Environment', 'ResourceType']).size().unstack(fill_value=0)
-    env_type_counts.plot(kind='bar', stacked=True)
-    plt.title('Resource Count by Environment and Type')
-    plt.xlabel('Environment')
-    plt.ylabel('Count')
-    plt.tight_layout()
-    plt.savefig('resource_count_by_env.png')
-    
-    # Cost and savings by environment
-    plt.figure(figsize=(12, 6))
-    envs = list(savings.keys())
-    current_costs = [savings[env]['current_cost'] for env in envs]
-    potential_savings = [savings[env]['potential_savings'] for env in envs]
-    
-    x = range(len(envs))
-    width = 0.35
-    
-    plt.bar(x, current_costs, width, label='Current Cost')
-    plt.bar([i + width for i in x], potential_savings, width, label='Potential Savings')
-    
-    plt.xlabel('Environment')
-    plt.ylabel('Cost ($)')
-    plt.title('Current Cost vs Potential Savings by Environment')
-    plt.xticks([i + width/2 for i in x], envs)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig('cost_savings_by_env.png')
-    
-    # Instance family distribution
-    plt.figure(figsize=(14, 8))
-    family_data = df[df['ResourceType'] != 'RDS'].copy()
-    family_data['Family'] = family_data['Type'].apply(lambda x: x.split('.')[0])
-    family_counts = family_data.groupby(['Environment', 'Family']).size().unstack(fill_value=0)
-    family_counts.plot(kind='bar', stacked=True)
-    plt.title('EC2/EKS Instance Family Distribution by Environment')
-    plt.xlabel('Environment')
-    plt.ylabel('Count')
-    plt.tight_layout()
-    plt.savefig('instance_family_by_env.png')
 
 if __name__ == "__main__":
     main()
 ```
 
-## Key Improvements and Features
+## Script Overview
 
-1. **Focus on Sydney Region (ap-southeast-2)**:
-   - Limited all resource queries to only the Sydney region
-   - Added region filtering in the Cost Explorer queries
+This script focuses solely on analyzing your AWS resources and costs by environment, without implementing a scheduler or visualizations. Here's what it does:
 
-2. **AWS Profile Authentication**:
-   - Added boto3 session creation using 'profile_n' profile
-   - All AWS clients now use this session for authentication
+1. **Resource Inventory**:
+   - Lists all EC2 instances, EKS nodes, and RDS instances in Sydney (ap-southeast-2) region
+   - Groups them by environment using the "asx_environment" tag
 
-3. **Enhanced Analysis**:
-   - Added instance family distribution analysis
-   - Better visualization of instance families by environment
+2. **Cost Analysis**:
+   - Uses the AWS Cost Explorer API to get cost data for the last 30 days
+   - Provides cost breakdown by:
+     - Service and environment
+     - Instance type and environment
+   - Calculates total cost by environment
 
-4. **Implementation Script**:
-   - Created a complete scheduling script for starting/stopping instances
-   - Added support for excluding instances from scheduling with a 'NoScheduling' tag
-   - Script accepts parameters for different environments
+3. **Savings Calculation**:
+   - Estimates potential savings from implementing an 8 AM to 11 PM weekday schedule
+   - Shows savings by environment and total potential savings
 
-## Scheduling Implementation
+## Running the Script
 
-The solution includes a fully functional instance scheduling script that can be used with AWS CloudWatch Events/EventBridge to automate the scheduling:
+To run this script, you need:
+1. The AWS profile "profile_n" configured with appropriate permissions
+2. Python with boto3 and pandas libraries installed
 
-1. **Schedule Rules**:
-   - Create a rule to run the script with `--action stop` at 11 PM Monday-Friday
-   - Create a rule to run the script with `--action start` at 8 AM Monday-Friday
+```bash
+# Install required packages
+pip install boto3 pandas
 
-2. **Sample CloudWatch Events rule (in CloudFormation)**:
-
-```yaml
-StopInstancesRule:
-  Type: AWS::Events::Rule
-  Properties:
-    Description: "Stop instances at 11 PM on weekdays"
-    ScheduleExpression: "cron(0 23 ? * MON-FRI *)"
-    State: ENABLED
-    Targets:
-      - Arn: !GetAtt SchedulingLambdaFunction.Arn
-        Id: "StopInstancesTarget"
-        Input: !Sub '{"action": "stop", "region": "ap-southeast-2", "environment": "dev"}'
+# Run the script
+python aws_cost_analysis.py
 ```
 
-## Cost Optimization Recommendations
+The script will output results to the console, showing you a detailed breakdown of resources and costs per environment, helping you understand where potential savings can be achieved.
 
-Based on the analysis, you'll be able to:
-
-1. Identify which environments would benefit most from scheduling
-2. See the distribution of instance families to help with:
-   - Reserved Instance planning
-   - Savings Plans optimization
-   - Instance family consolidation (standardizing on fewer families)
-
-The savings percentage is calculated based on the actual runtime reduction:
-- With scheduling: 15 hours/day × 5 days = 75 hours/week
-- Without scheduling: 24 hours/day × 7 days = 168 hours/week
-- Potential savings: ~55.36% of compute costs
-
-Would you like me to enhance any particular aspect of this solution or add additional features?​​​​​​​​​​​​​​​​
+Would you like me to refine any specific part of this analysis or add any particular features?​​​​​​​​​​​​​​​​
