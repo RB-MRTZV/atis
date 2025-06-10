@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 “””
 IAM Role Permissions Analyzer
-Retrieves and displays all permissions with conditions for a given IAM role
+Retrieves and displays all permissions from inline policies attached to an IAM role.
 “””
 
 import argparse
@@ -9,13 +9,13 @@ import json
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 from datetime import datetime
-from typing import Dict, List, Any, Tuple
+from tabulate import tabulate
 import sys
 
-def parse_arguments() -> argparse.Namespace:
-“”“Parse command line arguments”””
+def parse_arguments():
+“”“Parse command line arguments.”””
 parser = argparse.ArgumentParser(
-description=‘List all permissions with conditions for an IAM role’
+description=‘Analyze IAM role permissions from inline policies’
 )
 parser.add_argument(
 ‘–role-name’,
@@ -24,10 +24,10 @@ default=‘ConsumerAccountIaC’,
 help=‘IAM role name to analyze (default: ConsumerAccountIaC)’
 )
 parser.add_argument(
-‘–output-file’,
+‘–output-prefix’,
 type=str,
-default=‘iam_role_permissions.txt’,
-help=‘Output file name (default: iam_role_permissions.txt)’
+default=‘iam_permissions’,
+help=‘Prefix for output files (default: iam_permissions)’
 )
 parser.add_argument(
 ‘–region’,
@@ -37,109 +37,90 @@ help=‘AWS region (default: us-east-1)’
 )
 return parser.parse_args()
 
-def get_iam_client(region: str) -> boto3.client:
-“”“Create and return IAM client”””
+def get_iam_client(region):
+“”“Create and return IAM client.”””
 try:
 return boto3.client(‘iam’, region_name=region)
 except Exception as e:
 print(f”Error creating IAM client: {e}”)
 sys.exit(1)
 
-def get_role_details(iam_client: boto3.client, role_name: str) -> Dict[str, Any]:
-“”“Get role details including trust policy”””
+def verify_role_exists(iam_client, role_name):
+“”“Verify that the IAM role exists.”””
 try:
-response = iam_client.get_role(RoleName=role_name)
-return response[‘Role’]
+iam_client.get_role(RoleName=role_name)
+return True
 except ClientError as e:
 if e.response[‘Error’][‘Code’] == ‘NoSuchEntity’:
 print(f”Error: Role ‘{role_name}’ not found”)
+return False
 else:
-print(f”Error getting role details: {e}”)
-sys.exit(1)
+print(f”Error verifying role: {e}”)
+return False
 
-def get_attached_policies(iam_client: boto3.client, role_name: str) -> List[Dict[str, str]]:
-“”“Get all managed policies attached to the role”””
+def get_inline_policies(iam_client, role_name):
+“”“Get all inline policies for a role.”””
 policies = []
 try:
-paginator = iam_client.get_paginator(‘list_attached_role_policies’)
-for page in paginator.paginate(RoleName=role_name):
-policies.extend(page[‘AttachedPolicies’])
-except ClientError as e:
-print(f”Error listing attached policies: {e}”)
-return policies
-
-def get_inline_policies(iam_client: boto3.client, role_name: str) -> List[str]:
-“”“Get all inline policy names for the role”””
-policies = []
-try:
+# List all inline policies
 paginator = iam_client.get_paginator(‘list_role_policies’)
-for page in paginator.paginate(RoleName=role_name):
-policies.extend(page[‘PolicyNames’])
-except ClientError as e:
-print(f”Error listing inline policies: {e}”)
-return policies
-
-def get_policy_document(iam_client: boto3.client, policy_arn: str) -> Dict[str, Any]:
-“”“Get policy document for a managed policy”””
-try:
-# Get the default version
-policy_details = iam_client.get_policy(PolicyArn=policy_arn)
-version_id = policy_details[‘Policy’][‘DefaultVersionId’]
-
-```
-    # Get the policy document
-    response = iam_client.get_policy_version(
-        PolicyArn=policy_arn,
-        VersionId=version_id
-    )
-    return json.loads(response['PolicyVersion']['Document'])
-except ClientError as e:
-    print(f"Error getting policy document for {policy_arn}: {e}")
-    return {}
-```
-
-def get_inline_policy_document(iam_client: boto3.client, role_name: str, policy_name: str) -> Dict[str, Any]:
-“”“Get policy document for an inline policy”””
-try:
-response = iam_client.get_role_policy(
+for response in paginator.paginate(RoleName=role_name):
+for policy_name in response.get(‘PolicyNames’, []):
+# Get the policy document
+policy_response = iam_client.get_role_policy(
 RoleName=role_name,
 PolicyName=policy_name
 )
-return json.loads(response[‘PolicyDocument’])
-except ClientError as e:
-print(f”Error getting inline policy {policy_name}: {e}”)
-return {}
 
-def parse_statement_permissions(statement: Dict[str, Any]) -> List[Dict[str, Any]]:
-“”“Parse a policy statement and extract permissions with conditions”””
+```
+            policy_doc = policy_response['PolicyDocument']
+            policies.append({
+                'PolicyName': policy_name,
+                'PolicyDocument': policy_doc
+            })
+            
+except ClientError as e:
+    print(f"Error retrieving policies: {e}")
+    sys.exit(1)
+
+return policies
+```
+
+def parse_policy_statements(policy_document):
+“”“Parse policy statements to extract permissions and conditions.”””
 permissions = []
 
 ```
-effect = statement.get('Effect', 'Allow')
-actions = statement.get('Action', [])
-resources = statement.get('Resource', [])
-conditions = statement.get('Condition', {})
+statements = policy_document.get('Statement', [])
 
-# Ensure actions and resources are lists
-if isinstance(actions, str):
-    actions = [actions]
-if isinstance(resources, str):
-    resources = [resources]
-
-for action in actions:
-    permission = {
-        'Effect': effect,
-        'Action': action,
-        'Resources': resources,
-        'Conditions': conditions
-    }
-    permissions.append(permission)
+for idx, statement in enumerate(statements):
+    effect = statement.get('Effect', 'Unknown')
+    actions = statement.get('Action', [])
+    resources = statement.get('Resource', [])
+    conditions = statement.get('Condition', {})
+    
+    # Ensure actions and resources are lists
+    if isinstance(actions, str):
+        actions = [actions]
+    if isinstance(resources, str):
+        resources = [resources]
+    
+    # Parse each action
+    for action in actions:
+        permission = {
+            'StatementId': statement.get('Sid', f'Statement{idx+1}'),
+            'Effect': effect,
+            'Action': action,
+            'Resources': resources,
+            'Conditions': conditions
+        }
+        permissions.append(permission)
 
 return permissions
 ```
 
-def format_conditions(conditions: Dict[str, Any]) -> str:
-“”“Format conditions dictionary into readable string”””
+def format_conditions(conditions):
+“”“Format conditions for readable display.”””
 if not conditions:
 return “None”
 
@@ -148,144 +129,113 @@ formatted = []
 for operator, values in conditions.items():
     for key, value in values.items():
         if isinstance(value, list):
-            value_str = ', '.join(str(v) for v in value)
+            value_str = ', '.join(value)
         else:
             value_str = str(value)
-        formatted.append(f"{operator}: {key} = {value_str}")
+        formatted.append(f"{operator}:{key}={value_str}")
 
 return '; '.join(formatted)
 ```
 
-def format_resources(resources: List[str]) -> str:
-“”“Format resources list into readable string”””
+def format_resources(resources):
+“”“Format resources for readable display.”””
 if not resources:
-return “*”
+return “None”
+return ’, ’.join(resources) if isinstance(resources, list) else str(resources)
+
+def create_table_output(role_name, all_permissions):
+“”“Create a formatted table output.”””
+table_data = []
 
 ```
-# Truncate if too many resources
-if len(resources) > 3:
-    return f"{', '.join(resources[:3])}, ... ({len(resources)} total)"
+for policy_name, permissions in all_permissions.items():
+    for perm in permissions:
+        table_data.append([
+            policy_name,
+            perm['StatementId'],
+            perm['Effect'],
+            perm['Action'],
+            format_resources(perm['Resources']),
+            format_conditions(perm['Conditions'])
+        ])
 
-return ', '.join(resources)
+headers = ['Policy Name', 'Statement ID', 'Effect', 'Action', 'Resources', 'Conditions']
+
+return tabulate(table_data, headers=headers, tablefmt='grid', maxcolwidths=50)
 ```
 
-def write_permissions_table(permissions: List[Dict[str, Any]], role_name: str, output_file: str):
-“”“Write permissions to a formatted text file”””
-with open(output_file, ‘w’) as f:
-# Header
-f.write(”=” * 120 + “\n”)
-f.write(f”IAM Role Permissions Analysis\n”)
-f.write(f”Role: {role_name}\n”)
-f.write(f”Generated: {datetime.now().strftime(’%Y-%m-%d %H:%M:%S’)}\n”)
-f.write(”=” * 120 + “\n\n”)
+def save_outputs(role_name, all_permissions, output_prefix):
+“”“Save outputs to both text and JSON files.”””
+timestamp = datetime.now().strftime(’%Y%m%d_%H%M%S’)
 
 ```
-    # Summary
-    f.write(f"Total Permissions: {len(permissions)}\n")
-    with_conditions = sum(1 for p in permissions if p['Conditions'])
-    f.write(f"Permissions with Conditions: {with_conditions}\n")
-    f.write(f"Permissions without Conditions: {len(permissions) - with_conditions}\n\n")
-    
-    # Table header
-    f.write("-" * 120 + "\n")
-    f.write(f"{'Policy':<30} {'Effect':<8} {'Action':<40} {'Has Conditions':<15}\n")
-    f.write("-" * 120 + "\n")
-    
-    # Group by policy
-    for policy_name, policy_permissions in permissions.items():
-        for perm in policy_permissions:
-            has_conditions = "Yes" if perm['Conditions'] else "No"
-            f.write(f"{policy_name:<30} {perm['Effect']:<8} {perm['Action']:<40} {has_conditions:<15}\n")
-            
-            # Write resources
-            resources_str = format_resources(perm['Resources'])
-            f.write(f"{'':>30} Resources: {resources_str}\n")
-            
-            # Write conditions if present
-            if perm['Conditions']:
-                conditions_str = format_conditions(perm['Conditions'])
-                f.write(f"{'':>30} Conditions: {conditions_str}\n")
-            
-            f.write("\n")
-    
-    f.write("-" * 120 + "\n")
-```
+# Save JSON output
+json_filename = f"{output_prefix}_{timestamp}.json"
+json_output = {
+    'RoleName': role_name,
+    'Timestamp': timestamp,
+    'Policies': all_permissions
+}
 
-def analyze_role_permissions(role_name: str, region: str = ‘us-east-1’) -> Dict[str, List[Dict[str, Any]]]:
-“”“Main function to analyze role permissions”””
-iam_client = get_iam_client(region)
+with open(json_filename, 'w') as f:
+    json.dump(json_output, f, indent=2, default=str)
+print(f"JSON output saved to: {json_filename}")
 
-```
-# Get role details
-print(f"Analyzing role: {role_name}")
-role_details = get_role_details(iam_client, role_name)
+# Save text table output
+txt_filename = f"{output_prefix}_{timestamp}.txt"
+table_output = create_table_output(role_name, all_permissions)
 
-all_permissions = {}
+with open(txt_filename, 'w') as f:
+    f.write(f"IAM Role Permissions Analysis\n")
+    f.write(f"{'=' * 80}\n")
+    f.write(f"Role Name: {role_name}\n")
+    f.write(f"Analysis Date: {timestamp}\n")
+    f.write(f"{'=' * 80}\n\n")
+    f.write(table_output)
+    f.write(f"\n\nTotal Policies: {len(all_permissions)}\n")
+    
+    total_permissions = sum(len(perms) for perms in all_permissions.values())
+    f.write(f"Total Permission Entries: {total_permissions}\n")
 
-# Process managed policies
-print("Getting attached managed policies...")
-attached_policies = get_attached_policies(iam_client, role_name)
-for policy in attached_policies:
-    policy_name = policy['PolicyName']
-    policy_arn = policy['PolicyArn']
-    print(f"  Processing: {policy_name}")
-    
-    policy_doc = get_policy_document(iam_client, policy_arn)
-    permissions = []
-    
-    for statement in policy_doc.get('Statement', []):
-        permissions.extend(parse_statement_permissions(statement))
-    
-    all_permissions[f"[Managed] {policy_name}"] = permissions
-
-# Process inline policies
-print("Getting inline policies...")
-inline_policies = get_inline_policies(iam_client, role_name)
-for policy_name in inline_policies:
-    print(f"  Processing: {policy_name}")
-    
-    policy_doc = get_inline_policy_document(iam_client, role_name, policy_name)
-    permissions = []
-    
-    for statement in policy_doc.get('Statement', []):
-        permissions.extend(parse_statement_permissions(statement))
-    
-    all_permissions[f"[Inline] {policy_name}"] = permissions
-
-return all_permissions
+print(f"Text output saved to: {txt_filename}")
 ```
 
 def main():
-“”“Main execution function”””
+“”“Main function to orchestrate the analysis.”””
 args = parse_arguments()
 
 ```
-try:
-    # Analyze permissions
-    permissions = analyze_role_permissions(args.role_name, args.region)
-    
-    if not permissions:
-        print(f"\nNo policies found for role '{args.role_name}'")
-        return
-    
-    # Write to file
-    print(f"\nWriting results to {args.output_file}...")
-    write_permissions_table(permissions, args.role_name, args.output_file)
-    
-    # Summary
-    total_perms = sum(len(perms) for perms in permissions.values())
-    print(f"\nAnalysis complete!")
-    print(f"Total policies analyzed: {len(permissions)}")
-    print(f"Total permissions found: {total_perms}")
-    print(f"Results written to: {args.output_file}")
-    
-except KeyboardInterrupt:
-    print("\nOperation cancelled by user")
+print(f"Analyzing IAM role: {args.role_name}")
+
+# Create IAM client
+iam_client = get_iam_client(args.region)
+
+# Verify role exists
+if not verify_role_exists(iam_client, args.role_name):
     sys.exit(1)
-except Exception as e:
-    print(f"\nUnexpected error: {e}")
-    sys.exit(1)
+
+# Get inline policies
+print("Retrieving inline policies...")
+policies = get_inline_policies(iam_client, args.role_name)
+
+if not policies:
+    print(f"No inline policies found for role '{args.role_name}'")
+    sys.exit(0)
+
+print(f"Found {len(policies)} inline policies")
+
+# Parse all policies
+all_permissions = {}
+for policy in policies:
+    policy_name = policy['PolicyName']
+    permissions = parse_policy_statements(policy['PolicyDocument'])
+    all_permissions[policy_name] = permissions
+
+# Save outputs
+save_outputs(args.role_name, all_permissions, args.output_prefix)
+
+print("\nAnalysis complete!")
 ```
 
-if **name** == “**main**”:
+if **name** == ‘**main**’:
 main()
