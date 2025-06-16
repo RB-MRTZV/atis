@@ -1,0 +1,3 @@
+Account,Region,ClusterName,PreviousState,NewState,Action,Timestamp,Status,Error
+dev-account,us-west-2,test-cluster,"min=2, max=10, desired=3",dry_run_scaled_up,start,2025-05-29T14:00:55.247314,DryRun,
+dev-account,us-west-2,test-cluster,"min=2, max=10, desired=3",dry_run_scaled_up,start,2025-05-29T14:00:55.247508,DryRun,

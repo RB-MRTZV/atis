@@ -1,0 +1,535 @@
+import boto3
+import logging
+import subprocess
+import json
+import time
+from datetime import datetime, timedelta
+
+class WebhookManagerError(Exception):
+    pass
+
+class WebhookManager:
+    def __init__(self, dry_run=False):
+        self.logger = logging.getLogger(__name__)
+        self.dry_run = dry_run
+        self.webhook_timeout = 60  # 60 seconds timeout for webhook checks
+        
+        # Critical admission controllers that must be available
+        self.critical_webhooks = {
+            'kyverno': {
+                'namespace': 'kyverno',
+                'deployments': ['kyverno-admission-controller', 'kyverno-background-controller', 'kyverno-cleanup-controller'],
+                'webhooks': ['kyverno-policy-validating-webhook-cfg', 'kyverno-policy-mutating-webhook-cfg', 'kyverno-resource-validating-webhook-cfg', 'kyverno-resource-mutating-webhook-cfg']
+            },
+            'aws-load-balancer-controller': {
+                'namespace': 'kube-system',
+                'deployments': ['aws-load-balancer-controller'],
+                'webhooks': ['aws-load-balancer-webhook']
+            }
+        }
+        
+        if self.dry_run:
+            self.logger.info("Webhook Manager initialized in DRY RUN mode")
+
+    def _run_kubectl_command(self, command):
+        """Execute kubectl command via subprocess."""
+        try:
+            if self.dry_run:
+                self.logger.info(f"[DRY RUN] Would run kubectl command: {' '.join(command)}")
+                return True, "dry-run-output", ""
+            
+            self.logger.debug(f"Running kubectl command: {' '.join(command)}")
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=120
+            )
+            
+            success = result.returncode == 0
+            if not success:
+                self.logger.warning(f"kubectl command failed (exit {result.returncode}): {result.stderr}")
+                
+            return success, result.stdout, result.stderr
+            
+        except subprocess.TimeoutExpired:
+            self.logger.error("kubectl command timed out after 120 seconds")
+            return False, "", "Command timed out"
+        except Exception as e:
+            self.logger.error(f"Error running kubectl command: {str(e)}")
+            return False, "", str(e)
+
+    def get_validating_admission_webhooks(self):
+        """Get all ValidatingAdmissionWebhook configurations."""
+        try:
+            if self.dry_run:
+                self.logger.info("[DRY RUN] Would get ValidatingAdmissionWebhook configurations")
+                return ['kyverno-policy-validating-webhook-cfg', 'kyverno-resource-validating-webhook-cfg']
+            
+            command = ['kubectl', 'get', 'validatingadmissionwebhooks', '-o', 'json']
+            success, stdout, stderr = self._run_kubectl_command(command)
+            
+            if success:
+                try:
+                    webhook_data = json.loads(stdout)
+                    webhooks = []
+                    
+                    for item in webhook_data.get('items', []):
+                        webhook_name = item['metadata']['name']
+                        webhook_info = {
+                            'name': webhook_name,
+                            'type': 'validating',
+                            'webhooks': item.get('webhooks', [])
+                        }
+                        webhooks.append(webhook_info)
+                    
+                    self.logger.info(f"Found {len(webhooks)} ValidatingAdmissionWebhook configurations")
+                    return webhooks
+                    
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"Failed to parse ValidatingAdmissionWebhook JSON: {str(e)}")
+                    return []
+            else:
+                self.logger.warning(f"Failed to get ValidatingAdmissionWebhooks: {stderr}")
+                return []
+                
+        except Exception as e:
+            self.logger.error(f"Error getting ValidatingAdmissionWebhooks: {str(e)}")
+            return []
+
+    def get_mutating_admission_webhooks(self):
+        """Get all MutatingAdmissionWebhook configurations."""
+        try:
+            if self.dry_run:
+                self.logger.info("[DRY RUN] Would get MutatingAdmissionWebhook configurations")
+                return ['kyverno-policy-mutating-webhook-cfg', 'kyverno-resource-mutating-webhook-cfg']
+            
+            command = ['kubectl', 'get', 'mutatingadmissionwebhooks', '-o', 'json']
+            success, stdout, stderr = self._run_kubectl_command(command)
+            
+            if success:
+                try:
+                    webhook_data = json.loads(stdout)
+                    webhooks = []
+                    
+                    for item in webhook_data.get('items', []):
+                        webhook_name = item['metadata']['name']
+                        webhook_info = {
+                            'name': webhook_name,
+                            'type': 'mutating',
+                            'webhooks': item.get('webhooks', [])
+                        }
+                        webhooks.append(webhook_info)
+                    
+                    self.logger.info(f"Found {len(webhooks)} MutatingAdmissionWebhook configurations")
+                    return webhooks
+                    
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"Failed to parse MutatingAdmissionWebhook JSON: {str(e)}")
+                    return []
+            else:
+                self.logger.warning(f"Failed to get MutatingAdmissionWebhooks: {stderr}")
+                return []
+                
+        except Exception as e:
+            self.logger.error(f"Error getting MutatingAdmissionWebhooks: {str(e)}")
+            return []
+
+    def check_webhook_endpoint_health(self, webhook_info):
+        """Check if webhook endpoint is healthy by testing connectivity."""
+        try:
+            if self.dry_run:
+                self.logger.info(f"[DRY RUN] Would check health of webhook {webhook_info['name']}")
+                return True
+            
+            webhook_name = webhook_info['name']
+            
+            # For Kyverno webhooks, check if the service endpoints are ready
+            if 'kyverno' in webhook_name.lower():
+                return self._check_kyverno_webhook_health()
+            elif 'aws-load-balancer' in webhook_name.lower():
+                return self._check_aws_lb_webhook_health()
+            else:
+                # Generic webhook health check - just verify the webhook exists
+                self.logger.info(f"Generic webhook health check for {webhook_name} - assuming healthy if configured")
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"Error checking webhook endpoint health for {webhook_info['name']}: {str(e)}")
+            return False
+
+    def _check_kyverno_webhook_health(self):
+        """Check Kyverno webhook service health."""
+        try:
+            # Check if Kyverno webhook service has endpoints
+            command = ['kubectl', 'get', 'endpoints', 'kyverno-svc-metrics', '-n', 'kyverno', '-o', 'json']
+            success, stdout, stderr = self._run_kubectl_command(command)
+            
+            if success:
+                try:
+                    endpoint_data = json.loads(stdout)
+                    subsets = endpoint_data.get('subsets', [])
+                    
+                    if subsets and any(subset.get('addresses') for subset in subsets):
+                        self.logger.info("Kyverno webhook service has healthy endpoints")
+                        return True
+                    else:
+                        self.logger.warning("Kyverno webhook service has no ready endpoints")
+                        return False
+                        
+                except json.JSONDecodeError:
+                    self.logger.warning("Failed to parse Kyverno service endpoints")
+                    return False
+            else:
+                self.logger.warning(f"Failed to get Kyverno service endpoints: {stderr}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error checking Kyverno webhook health: {str(e)}")
+            return False
+
+    def _check_aws_lb_webhook_health(self):
+        """Check AWS Load Balancer Controller webhook health."""
+        try:
+            # Check if AWS LB Controller webhook service has endpoints
+            command = ['kubectl', 'get', 'endpoints', 'aws-load-balancer-webhook-service', '-n', 'kube-system', '-o', 'json']
+            success, stdout, stderr = self._run_kubectl_command(command)
+            
+            if success:
+                try:
+                    endpoint_data = json.loads(stdout)
+                    subsets = endpoint_data.get('subsets', [])
+                    
+                    if subsets and any(subset.get('addresses') for subset in subsets):
+                        self.logger.info("AWS Load Balancer Controller webhook service has healthy endpoints")
+                        return True
+                    else:
+                        self.logger.warning("AWS Load Balancer Controller webhook service has no ready endpoints")
+                        return False
+                        
+                except json.JSONDecodeError:
+                    self.logger.warning("Failed to parse AWS LB Controller service endpoints")
+                    return False
+            else:
+                # Webhook service might not exist, check if controller is running
+                return self._check_deployment_ready('aws-load-balancer-controller', 'kube-system')
+                
+        except Exception as e:
+            self.logger.error(f"Error checking AWS LB Controller webhook health: {str(e)}")
+            return False
+
+    def _check_deployment_ready(self, deployment_name, namespace):
+        """Check if a deployment is ready."""
+        try:
+            if self.dry_run:
+                self.logger.info(f"[DRY RUN] Would check if deployment {deployment_name} in {namespace} is ready")
+                return True
+            
+            command = ['kubectl', 'get', 'deployment', deployment_name, '-n', namespace, '-o', 'json']
+            success, stdout, stderr = self._run_kubectl_command(command)
+            
+            if success:
+                try:
+                    deployment_data = json.loads(stdout)
+                    status = deployment_data.get('status', {})
+                    
+                    replicas = status.get('replicas', 0)
+                    ready_replicas = status.get('readyReplicas', 0)
+                    
+                    is_ready = replicas > 0 and ready_replicas == replicas
+                    
+                    self.logger.info(f"Deployment {deployment_name} in {namespace}: "
+                                   f"{ready_replicas}/{replicas} replicas ready")
+                    
+                    return is_ready
+                    
+                except json.JSONDecodeError:
+                    self.logger.warning(f"Failed to parse deployment {deployment_name} JSON")
+                    return False
+            else:
+                self.logger.warning(f"Failed to get deployment {deployment_name}: {stderr}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error checking deployment {deployment_name} readiness: {str(e)}")
+            return False
+
+    def disable_critical_webhooks(self):
+        """Temporarily disable critical webhooks to prevent bootstrap deadlocks."""
+        try:
+            if self.dry_run:
+                self.logger.info("[DRY RUN] Would disable critical webhooks")
+                return True
+            
+            self.logger.info("Disabling critical webhooks to prevent bootstrap deadlocks...")
+            
+            disabled_webhooks = []
+            
+            # Get all validating webhooks
+            validating_webhooks = self.get_validating_admission_webhooks()
+            for webhook in validating_webhooks:
+                if any(critical in webhook['name'].lower() for critical in ['kyverno']):
+                    if self._disable_webhook(webhook['name'], 'validatingadmissionwebhooks'):
+                        disabled_webhooks.append(webhook['name'])
+            
+            # Get all mutating webhooks
+            mutating_webhooks = self.get_mutating_admission_webhooks()
+            for webhook in mutating_webhooks:
+                if any(critical in webhook['name'].lower() for critical in ['kyverno']):
+                    if self._disable_webhook(webhook['name'], 'mutatingadmissionwebhooks'):
+                        disabled_webhooks.append(webhook['name'])
+            
+            self.logger.info(f"Disabled {len(disabled_webhooks)} critical webhooks: {disabled_webhooks}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error disabling critical webhooks: {str(e)}")
+            return False
+
+    def _disable_webhook(self, webhook_name, webhook_type):
+        """Disable a specific webhook by setting failurePolicy to Ignore."""
+        try:
+            # Get current webhook configuration
+            command = ['kubectl', 'get', webhook_type, webhook_name, '-o', 'json']
+            success, stdout, stderr = self._run_kubectl_command(command)
+            
+            if not success:
+                self.logger.warning(f"Failed to get webhook {webhook_name}: {stderr}")
+                return False
+            
+            try:
+                webhook_config = json.loads(stdout)
+                
+                # Set failurePolicy to Ignore for all webhooks in the configuration
+                webhooks = webhook_config.get('webhooks', [])
+                modified = False
+                
+                for webhook in webhooks:
+                    if webhook.get('failurePolicy') != 'Ignore':
+                        webhook['failurePolicy'] = 'Ignore'
+                        modified = True
+                
+                if modified:
+                    # Apply the modified configuration
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                        json.dump(webhook_config, f, indent=2)
+                        temp_file = f.name
+                    
+                    apply_command = ['kubectl', 'apply', '-f', temp_file]
+                    apply_success, apply_stdout, apply_stderr = self._run_kubectl_command(apply_command)
+                    
+                    # Clean up temp file
+                    import os
+                    os.unlink(temp_file)
+                    
+                    if apply_success:
+                        self.logger.info(f"Successfully set failurePolicy to Ignore for webhook {webhook_name}")
+                        return True
+                    else:
+                        self.logger.error(f"Failed to apply webhook configuration for {webhook_name}: {apply_stderr}")
+                        return False
+                else:
+                    self.logger.info(f"Webhook {webhook_name} already has failurePolicy set to Ignore")
+                    return True
+                
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Failed to parse webhook configuration for {webhook_name}: {str(e)}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error disabling webhook {webhook_name}: {str(e)}")
+            return False
+
+    def enable_critical_webhooks(self):
+        """Re-enable critical webhooks after cluster is stable."""
+        try:
+            if self.dry_run:
+                self.logger.info("[DRY RUN] Would re-enable critical webhooks")
+                return True
+            
+            self.logger.info("Re-enabling critical webhooks...")
+            
+            enabled_webhooks = []
+            
+            # Get all validating webhooks
+            validating_webhooks = self.get_validating_admission_webhooks()
+            for webhook in validating_webhooks:
+                if any(critical in webhook['name'].lower() for critical in ['kyverno']):
+                    if self._enable_webhook(webhook['name'], 'validatingadmissionwebhooks'):
+                        enabled_webhooks.append(webhook['name'])
+            
+            # Get all mutating webhooks
+            mutating_webhooks = self.get_mutating_admission_webhooks()
+            for webhook in mutating_webhooks:
+                if any(critical in webhook['name'].lower() for critical in ['kyverno']):
+                    if self._enable_webhook(webhook['name'], 'mutatingadmissionwebhooks'):
+                        enabled_webhooks.append(webhook['name'])
+            
+            self.logger.info(f"Re-enabled {len(enabled_webhooks)} critical webhooks: {enabled_webhooks}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error re-enabling critical webhooks: {str(e)}")
+            return False
+
+    def _enable_webhook(self, webhook_name, webhook_type):
+        """Enable a specific webhook by setting failurePolicy to Fail."""
+        try:
+            # Get current webhook configuration
+            command = ['kubectl', 'get', webhook_type, webhook_name, '-o', 'json']
+            success, stdout, stderr = self._run_kubectl_command(command)
+            
+            if not success:
+                self.logger.warning(f"Failed to get webhook {webhook_name}: {stderr}")
+                return False
+            
+            try:
+                webhook_config = json.loads(stdout)
+                
+                # Set failurePolicy to Fail for all webhooks in the configuration
+                webhooks = webhook_config.get('webhooks', [])
+                modified = False
+                
+                for webhook in webhooks:
+                    if webhook.get('failurePolicy') != 'Fail':
+                        webhook['failurePolicy'] = 'Fail'
+                        modified = True
+                
+                if modified:
+                    # Apply the modified configuration
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                        json.dump(webhook_config, f, indent=2)
+                        temp_file = f.name
+                    
+                    apply_command = ['kubectl', 'apply', '-f', temp_file]
+                    apply_success, apply_stdout, apply_stderr = self._run_kubectl_command(apply_command)
+                    
+                    # Clean up temp file
+                    import os
+                    os.unlink(temp_file)
+                    
+                    if apply_success:
+                        self.logger.info(f"Successfully set failurePolicy to Fail for webhook {webhook_name}")
+                        return True
+                    else:
+                        self.logger.error(f"Failed to apply webhook configuration for {webhook_name}: {apply_stderr}")
+                        return False
+                else:
+                    self.logger.info(f"Webhook {webhook_name} already has failurePolicy set to Fail")
+                    return True
+                
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Failed to parse webhook configuration for {webhook_name}: {str(e)}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error enabling webhook {webhook_name}: {str(e)}")
+            return False
+
+    def validate_webhooks_ready(self, timeout=300):
+        """Validate that all critical webhooks are ready and healthy."""
+        try:
+            if self.dry_run:
+                self.logger.info(f"[DRY RUN] Would validate webhooks ready (timeout: {timeout}s)")
+                return True
+            
+            self.logger.info(f"Validating webhooks are ready (timeout: {timeout}s)...")
+            
+            start_time = datetime.now()
+            timeout_time = start_time + timedelta(seconds=timeout)
+            
+            while datetime.now() < timeout_time:
+                all_ready = True
+                
+                # Check all critical deployments
+                for system_name, config in self.critical_webhooks.items():
+                    for deployment in config['deployments']:
+                        if not self._check_deployment_ready(deployment, config['namespace']):
+                            self.logger.info(f"Waiting for {deployment} in {config['namespace']} to be ready...")
+                            all_ready = False
+                            break
+                    
+                    if not all_ready:
+                        break
+                
+                if all_ready:
+                    self.logger.info("All critical webhook deployments are ready")
+                    
+                    # Give a bit more time for webhooks to fully initialize
+                    time.sleep(10)
+                    
+                    # Test webhook health
+                    all_webhooks = self.get_validating_admission_webhooks() + self.get_mutating_admission_webhooks()
+                    webhook_health = True
+                    
+                    for webhook in all_webhooks:
+                        if any(critical in webhook['name'].lower() for critical in ['kyverno', 'aws-load-balancer']):
+                            if not self.check_webhook_endpoint_health(webhook):
+                                self.logger.warning(f"Webhook {webhook['name']} is not healthy")
+                                webhook_health = False
+                    
+                    if webhook_health:
+                        self.logger.info("All critical webhooks are ready and healthy")
+                        return True
+                
+                time.sleep(15)
+            
+            # Timeout reached
+            self.logger.error(f"Timeout waiting for webhooks to be ready after {timeout} seconds")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error validating webhooks ready: {str(e)}")
+            return False
+
+    def get_webhook_status_summary(self):
+        """Get a summary of all webhook statuses."""
+        try:
+            if self.dry_run:
+                return {
+                    'validating_webhooks': 2,
+                    'mutating_webhooks': 2,
+                    'healthy_webhooks': 4,
+                    'critical_deployments_ready': True
+                }
+            
+            validating_webhooks = self.get_validating_admission_webhooks()
+            mutating_webhooks = self.get_mutating_admission_webhooks()
+            
+            healthy_count = 0
+            total_critical = 0
+            
+            all_webhooks = validating_webhooks + mutating_webhooks
+            
+            for webhook in all_webhooks:
+                if any(critical in webhook['name'].lower() for critical in ['kyverno', 'aws-load-balancer']):
+                    total_critical += 1
+                    if self.check_webhook_endpoint_health(webhook):
+                        healthy_count += 1
+            
+            # Check critical deployments
+            deployments_ready = True
+            for system_name, config in self.critical_webhooks.items():
+                for deployment in config['deployments']:
+                    if not self._check_deployment_ready(deployment, config['namespace']):
+                        deployments_ready = False
+                        break
+                if not deployments_ready:
+                    break
+            
+            return {
+                'validating_webhooks': len(validating_webhooks),
+                'mutating_webhooks': len(mutating_webhooks),
+                'healthy_critical_webhooks': healthy_count,
+                'total_critical_webhooks': total_critical,
+                'critical_deployments_ready': deployments_ready
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting webhook status summary: {str(e)}")
+            return {
+                'error': str(e)
+            }
