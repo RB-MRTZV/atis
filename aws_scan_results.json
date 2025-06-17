@@ -1,0 +1,179 @@
+{
+  "account_id": "534406390912",
+  "region": "ap-southeast-2",
+  "scan_time": "2025-06-17T06:19:33.228756",
+  "ec2_instances": [
+    {
+      "instance_id": "i-03ad60a02a3f6267c",
+      "instance_type": "t2.micro",
+      "environment": "unknown",
+      "is_ephemeral": false,
+      "type": "Managed",
+      "in_asg": false,
+      "asg_name": null,
+      "availability_zone": "ap-southeast-2a",
+      "launch_time": "2021-05-07T01:00:31+00:00",
+      "tags": {
+        "Name": "Jump"
+      }
+    },
+    {
+      "instance_id": "i-0d1b194cfaaec09ad",
+      "instance_type": "t2.micro",
+      "environment": "unknown",
+      "is_ephemeral": false,
+      "type": "Managed",
+      "in_asg": false,
+      "asg_name": null,
+      "availability_zone": "ap-southeast-2a",
+      "launch_time": "2021-05-14T00:38:24+00:00",
+      "tags": {
+        "Name": "Wordpress"
+      }
+    },
+    {
+      "instance_id": "i-0773bc163483f0c81",
+      "instance_type": "t2.medium",
+      "environment": "unknown",
+      "is_ephemeral": false,
+      "type": "Managed",
+      "in_asg": false,
+      "asg_name": null,
+      "availability_zone": "ap-southeast-2a",
+      "launch_time": "2021-05-13T00:03:59+00:00",
+      "tags": {
+        "Name": "FM"
+      }
+    },
+    {
+      "instance_id": "i-06d4f6e20e0ce75ff",
+      "instance_type": "t2.xlarge",
+      "environment": "unknown",
+      "is_ephemeral": false,
+      "type": "Managed",
+      "in_asg": false,
+      "asg_name": null,
+      "availability_zone": "ap-southeast-2a",
+      "launch_time": "2024-03-06T07:21:47+00:00",
+      "tags": {
+        "Name": "Stage"
+      }
+    },
+    {
+      "instance_id": "i-03d324c2966451b0c",
+      "instance_type": "t2.small",
+      "environment": "unknown",
+      "is_ephemeral": false,
+      "type": "Managed",
+      "in_asg": false,
+      "asg_name": null,
+      "availability_zone": "ap-southeast-2b",
+      "launch_time": "2022-10-05T22:13:47+00:00",
+      "tags": {
+        "Name": "RTA-Website"
+      }
+    },
+    {
+      "instance_id": "i-073409690b1333f1b",
+      "instance_type": "t3.large",
+      "environment": "unknown",
+      "is_ephemeral": false,
+      "type": "Managed",
+      "in_asg": false,
+      "asg_name": null,
+      "availability_zone": "ap-southeast-2a",
+      "launch_time": "2025-04-23T15:27:11+00:00",
+      "tags": {
+        "Name": "Jenkins"
+      }
+    },
+    {
+      "instance_id": "i-0dbe6ae5e21d053a9",
+      "instance_type": "t3.small",
+      "environment": "unknown",
+      "is_ephemeral": false,
+      "type": "Managed",
+      "in_asg": false,
+      "asg_name": null,
+      "availability_zone": "ap-southeast-2a",
+      "launch_time": "2024-05-27T12:42:00+00:00",
+      "tags": {
+        "Name": "URM-Staging-MongoDB"
+      }
+    },
+    {
+      "instance_id": "i-004f01a439f80ab66",
+      "instance_type": "t2.small",
+      "environment": "unknown",
+      "is_ephemeral": false,
+      "type": "Managed",
+      "in_asg": false,
+      "asg_name": null,
+      "availability_zone": "ap-southeast-2b",
+      "launch_time": "2025-05-23T02:10:22+00:00",
+      "tags": {
+        "scheduled": "enabled",
+        "Name": "VPN-Test"
+      }
+    },
+    {
+      "instance_id": "i-0509dcd40a6d931ab",
+      "instance_type": "t2.medium",
+      "environment": "unknown",
+      "is_ephemeral": false,
+      "type": "Managed",
+      "in_asg": false,
+      "asg_name": null,
+      "availability_zone": "ap-southeast-2a",
+      "launch_time": "2025-05-23T02:10:22+00:00",
+      "tags": {
+        "scheduled": "enabled",
+        "Name": "PR"
+      }
+    },
+    {
+      "instance_id": "i-00b5d66eb38457366",
+      "instance_type": "t2.small",
+      "environment": "unknown",
+      "is_ephemeral": false,
+      "type": "Managed",
+      "in_asg": false,
+      "asg_name": null,
+      "availability_zone": "ap-southeast-2a",
+      "launch_time": "2025-02-12T09:36:20+00:00",
+      "tags": {
+        "Name": "Monitoring"
+      }
+    }
+  ],
+  "rds_instances": [
+    {
+      "instance_id": "maindb",
+      "instance_class": "db.t3.medium",
+      "engine": "postgres",
+      "engine_version": "12.19",
+      "multi_az": false,
+      "environment": "unknown",
+      "storage_type": "gp2",
+      "allocated_storage": 150,
+      "iops": 0,
+      "tags": {}
+    },
+    {
+      "instance_id": "urm-production",
+      "instance_class": "db.t3.small",
+      "engine": "postgres",
+      "engine_version": "15.12",
+      "multi_az": false,
+      "environment": "unknown",
+      "storage_type": "gp3",
+      "allocated_storage": 200,
+      "iops": 3000,
+      "tags": {
+        "App": "URM",
+        "devops-guru-default": "URM-Production"
+      }
+    }
+  ],
+  "eks_nodes": []
+}

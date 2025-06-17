@@ -1,0 +1,25 @@
+{
+  "generated_at": "2025-06-17T06:19:34.659927",
+  "accounts": [
+    {
+      "account_id": "534406390912",
+      "account_name": "Account 534406390912",
+      "region": "ap-southeast-2",
+      "scan_time": "2025-06-17T06:19:33.228756",
+      "estimation_time": "2025-06-17T06:19:34.656206",
+      "file_name": "534406390912.json",
+      "total_monthly_cost": 552.384,
+      "resource_count": 12
+    },
+    {
+      "account_id": "unknown",
+      "account_name": "Account unknown",
+      "region": "unknown",
+      "scan_time": null,
+      "estimation_time": null,
+      "file_name": "manifest.json",
+      "total_monthly_cost": 0,
+      "resource_count": 0
+    }
+  ]
+}

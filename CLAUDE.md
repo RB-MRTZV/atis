@@ -19,8 +19,20 @@ python aws_cost_analyzer.py --generate-manifest-only
 # Generate standalone dashboard (no web server needed)
 python aws_cost_analyzer.py --generate-standalone-dashboard
 
+# Alternative: Generate standalone dashboard separately
+python generate_standalone_dashboard.py
+
 # Run with verbose logging
 python aws_cost_analyzer.py -v
+
+### Updating AWS Pricing Data
+
+```bash
+# Fetch current AWS pricing from AWS Price List API
+python fetch_aws_pricing.py --region ap-southeast-2 --verbose
+
+# Or for a different region
+python fetch_aws_pricing.py --region us-east-1 --verbose
 ```
 
 ### Two-Stage Process (for manual control)
@@ -40,9 +52,12 @@ python report_generator.py
 # Install dependencies
 pip install -r requirements.txt
 
-# View multi-account dashboard locally
+# View multi-account dashboard locally (original method)
 python -m http.server 8080
 # Then navigate to http://localhost:8080/dashboard.html
+
+# Or open the standalone dashboard directly (no web server needed)
+# Just double-click dashboard_standalone.html or open it in your browser
 ```
 
 ## High-Level Architecture

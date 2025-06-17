@@ -1,0 +1,4 @@
+service,environment,resource_count,daily_cost,monthly_cost,currency
+EC2,unknown,10,14.38,431.42,USD
+RDS,unknown,2,4.03,120.96,USD
+TOTAL,ALL,12,18.41,552.38,USD
