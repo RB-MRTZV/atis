@@ -514,16 +514,29 @@
                 // Load data from embedded sources
                 allAccountData = [];
                 
+                // Validate embedded data
+                if (!EMBEDDED_MANIFEST) {
+                    throw new Error('Embedded manifest data not found');
+                }
+                
+                if (!EMBEDDED_MANIFEST.accounts || !Array.isArray(EMBEDDED_MANIFEST.accounts)) {
+                    throw new Error('Invalid manifest accounts data');
+                }
+                
+                if (!EMBEDDED_ACCOUNT_DATA) {
+                    throw new Error('Embedded account data not found');
+                }
+                
                 // Load data from each account in the manifest
                 EMBEDDED_MANIFEST.accounts.forEach(account => {
                     const accountId = account.account_id;
-                    if (EMBEDDED_ACCOUNT_DATA[accountId]) {
+                    if (EMBEDDED_ACCOUNT_DATA[accountId] && accountId !== 'unknown') {
                         allAccountData.push(EMBEDDED_ACCOUNT_DATA[accountId]);
                     }
                 });
                 
                 if (allAccountData.length === 0) {
-                    throw new Error('No account data found. Please generate reports first.');
+                    throw new Error('No valid account data found. Please generate reports first.');
                 }
                 
                 populateFilters();
@@ -535,6 +548,7 @@
                 dashboardData.classList.remove('hidden');
                 
             } catch (error) {
+                console.error('Dashboard loading error:', error);
                 loadingIndicator.innerHTML = `<div class="error">Error loading data: ${error.message}</div>`;
             }
         }

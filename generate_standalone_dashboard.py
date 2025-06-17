@@ -21,14 +21,19 @@ def generate_standalone_dashboard():
     with open(manifest_path, 'r') as f:
         manifest = json.load(f)
     
-    # Load all account data
+    # Load all account data (excluding invalid entries)
     all_account_data = {}
     for account in manifest['accounts']:
+        account_id = account['account_id']
+        # Skip invalid entries
+        if account_id == 'unknown' or account['file_name'] == 'manifest.json':
+            continue
+            
         data_file = Path(f"reports/data/{account['file_name']}")
         if data_file.exists():
             with open(data_file, 'r') as f:
                 account_data = json.load(f)
-                all_account_data[account['account_id']] = account_data
+                all_account_data[account_id] = account_data
     
     # Read the original dashboard HTML template
     dashboard_path = Path('dashboard.html')
@@ -50,9 +55,16 @@ def generate_standalone_dashboard():
         print("Error: Could not find data injection points in dashboard.html")
         return
     
+    # Filter manifest to exclude invalid entries
+    filtered_manifest = {
+        'generated_at': manifest['generated_at'],
+        'accounts': [account for account in manifest['accounts'] 
+                    if account['account_id'] != 'unknown' and account['file_name'] != 'manifest.json']
+    }
+    
     # Create the embedded data section
     embedded_data_section = f"""// Embedded data (eliminates CORS issues)
-        const EMBEDDED_MANIFEST = {json.dumps(manifest)};
+        const EMBEDDED_MANIFEST = {json.dumps(filtered_manifest)};
         
         const EMBEDDED_ACCOUNT_DATA = {json.dumps(all_account_data)};
         
