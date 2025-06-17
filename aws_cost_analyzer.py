@@ -17,6 +17,7 @@ from aws_scanner import AWSResourceScanner
 from cost_estimator import CostEstimator
 from report_generator import ReportGenerator
 from generate_manifest import generate_manifest
+from generate_standalone_dashboard import generate_standalone_dashboard
 
 # Setup logging
 logging.basicConfig(
@@ -156,6 +157,8 @@ def main():
                        help='Friendly name for the AWS account')
     parser.add_argument('--generate-manifest-only', action='store_true',
                        help='Only generate manifest file from existing data')
+    parser.add_argument('--generate-standalone-dashboard', action='store_true',
+                       help='Generate a standalone dashboard HTML with embedded data (no web server needed)')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Enable verbose logging')
     
@@ -177,6 +180,16 @@ def main():
             sys.exit(0)
         except Exception as e:
             logger.error(f"Failed to generate manifest: {e}")
+            sys.exit(1)
+    
+    # Handle standalone dashboard generation
+    if args.generate_standalone_dashboard:
+        logger.info("Generating standalone dashboard...")
+        try:
+            generate_standalone_dashboard()
+            sys.exit(0)
+        except Exception as e:
+            logger.error(f"Failed to generate standalone dashboard: {e}")
             sys.exit(1)
     
     # Run full analysis
