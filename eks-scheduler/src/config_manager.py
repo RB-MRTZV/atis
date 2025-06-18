@@ -11,12 +11,11 @@ class ConfigurationError(Exception):
 class ConfigManager:
     """Manages configuration for the EKS scheduler."""
     
-    def __init__(self, config_file=None, accounts_file=None):
+    def __init__(self, config_file=None):
         """Initialize the configuration manager.
         
         Args:
             config_file (str, optional): Path to the config.ini file
-            accounts_file (str, optional): Path to the accounts.json file
         """
         self.logger = logging.getLogger(__name__)
         
@@ -32,24 +31,11 @@ class ConfigManager:
                 '../config/config.ini'
             ]
             config_file = self._find_existing_file(possible_configs, 'config.ini')
-            
-        if accounts_file is None:
-            # Try multiple possible locations
-            possible_accounts = [
-                script_dir / '../config/accounts.json',
-                'eks-scheduler/config/accounts.json',
-                'config/accounts.json',
-                '../config/accounts.json'
-            ]
-            accounts_file = self._find_existing_file(possible_accounts, 'accounts.json')
         
         self.config_file = str(config_file)
-        self.accounts_file = str(accounts_file)
         self.config = None
-        self.accounts = None
         
         self.load_config()
-        self.load_accounts()
     
     def _find_existing_file(self, possible_paths, filename):
         """Find the first existing file from a list of possible paths.
@@ -102,6 +88,28 @@ class ConfigManager:
                     'file': 'eks-scheduler.log'
                 }
                 
+                self.config['exclusions'] = {
+                    'excluded_clusters': ''
+                }
+                
+                self.config['autoscaler'] = {
+                    'deployment_name': 'cluster-autoscaler'
+                }
+                
+                self.config['webhooks'] = {
+                    'webhook_names': 'aws-load-balancer-webhook:kube-system,kyverno-policy-webhook,kyverno-resource-webhook'
+                }
+                
+                self.config['timeouts'] = {
+                    'webhook_timeout': '60',
+                    'drain_timeout': '300',
+                    'pod_grace_period': '30',
+                    'bootstrap_validation_timeout': '600',
+                    'dependency_startup_timeout': '300',
+                    'kubectl_timeout': '120',
+                    'aws_cli_timeout': '60'
+                }
+                
                 with open(self.config_file, 'w') as f:
                     self.config.write(f)
                     
@@ -114,35 +122,61 @@ class ConfigManager:
             self.logger.error(f"Failed to load configuration: {str(e)}")
             raise ConfigurationError(f"Failed to load configuration: {str(e)}")
 
-    def load_accounts(self):
-        """Load accounts from accounts file."""
-        try:
-            if not Path(self.accounts_file).exists():
-                self.logger.warning(f"Accounts file {self.accounts_file} not found, creating placeholder")
-                os.makedirs(os.path.dirname(self.accounts_file), exist_ok=True)
-                
-                # Create placeholder accounts file
-                placeholder_accounts = [
-                    {
-                        "name": "default",
-                        "region": "us-west-2",
-                        "description": "Default account"
-                    }
-                ]
-                
-                with open(self.accounts_file, 'w') as f:
-                    json.dump(placeholder_accounts, f, indent=2)
-                    
-                self.accounts = placeholder_accounts
-                self.logger.info(f"Created placeholder accounts file: {self.accounts_file}")
+    def get_excluded_clusters(self):
+        """Get list of excluded cluster names.
+        
+        Returns:
+            list: List of cluster names to exclude
+        """
+        excluded_str = self.get('exclusions', 'excluded_clusters', '')
+        if not excluded_str:
+            return []
+        return [cluster.strip() for cluster in excluded_str.split(',') if cluster.strip()]
+    
+    def get_autoscaler_deployment_name(self):
+        """Get the name of the cluster autoscaler deployment.
+        
+        Returns:
+            str: Autoscaler deployment name
+        """
+        return self.get('autoscaler', 'deployment_name', 'cluster-autoscaler')
+    
+    def get_webhook_names(self):
+        """Get list of webhook names to manage.
+        
+        Returns:
+            list: List of tuples (webhook_name, namespace) where namespace can be None
+        """
+        webhook_str = self.get('webhooks', 'webhook_names', '')
+        if not webhook_str:
+            return []
+        
+        webhooks = []
+        for webhook in webhook_str.split(','):
+            webhook = webhook.strip()
+            if ':' in webhook:
+                name, namespace = webhook.split(':', 1)
+                webhooks.append((name.strip(), namespace.strip()))
             else:
-                with open(self.accounts_file, 'r') as f:
-                    self.accounts = json.load(f)
-                self.logger.info(f"Loaded {len(self.accounts)} accounts from {self.accounts_file}")
-                
-        except Exception as e:
-            self.logger.error(f"Failed to load accounts: {str(e)}")
-            raise ConfigurationError(f"Failed to load accounts: {str(e)}")
+                webhooks.append((webhook, None))
+        return webhooks
+    
+    def get_timeout(self, timeout_name, default=None):
+        """Get a timeout value from configuration.
+        
+        Args:
+            timeout_name (str): Name of the timeout
+            default (int): Default value if not found
+            
+        Returns:
+            int: Timeout value in seconds
+        """
+        value = self.get('timeouts', timeout_name, str(default) if default else None)
+        try:
+            return int(value) if value else default
+        except ValueError:
+            self.logger.warning(f"Invalid timeout value for {timeout_name}: {value}, using default: {default}")
+            return default
 
     def get(self, section, key, fallback=None):
         """Get a configuration value.
@@ -161,27 +195,4 @@ class ConfigManager:
             self.logger.warning(f"Configuration key [{section}] {key} not found, using fallback: {fallback}")
             return fallback
 
-    def get_accounts(self):
-        """Get all accounts.
-        
-        Returns:
-            list: List of account dictionaries
-        """
-        return self.accounts if self.accounts else []
-    
-    def get_account_by_name(self, account_name):
-        """Get account by name.
-        
-        Args:
-            account_name (str): Account name to find
-            
-        Returns:
-            dict: Account dictionary or None if not found
-        """
-        if not self.accounts:
-            return None
-            
-        for account in self.accounts:
-            if account.get('name') == account_name:
-                return account
-        return None 
+ 

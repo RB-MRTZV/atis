@@ -9,10 +9,11 @@ class DependencyManagerError(Exception):
     pass
 
 class DependencyManager:
-    def __init__(self, dry_run=False):
+    def __init__(self, dry_run=False, config_manager=None):
         self.logger = logging.getLogger(__name__)
         self.dry_run = dry_run
-        self.startup_timeout = 300  # 5 minutes timeout for each dependency tier
+        self.config_manager = config_manager
+        self.startup_timeout = config_manager.get_timeout('dependency_startup_timeout', 300) if config_manager else 300  # 5 minutes timeout for each dependency tier
         
         # Define dependency tiers - services must start in this order
         self.dependency_tiers = [

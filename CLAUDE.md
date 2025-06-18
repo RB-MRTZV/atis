@@ -100,9 +100,44 @@ The EKS scheduler includes sophisticated safety and management features:
 - Handles service mesh dependencies
 - Prevents cascading failures
 
+### EKS Scheduler Configuration (Updated)
+The EKS scheduler has been updated with enhanced configuration options:
+
+#### Required Configuration Sections in `config/config.ini`:
+
+**[exclusions]** - Cluster exclusion list
+- `excluded_clusters` - Comma-separated list of cluster names to exclude from scaling
+- Example: `excluded_clusters = production-critical,staging-critical`
+
+**[autoscaler]** - Autoscaler configuration
+- `deployment_name` - Name of the cluster autoscaler deployment
+- To find: `kubectl get deployments -n kube-system | grep autoscaler`
+- Common names: `cluster-autoscaler`, `cluster-autoscaler-aws`
+
+**[webhooks]** - Webhook management configuration
+- `webhook_names` - Comma-separated list of webhook names to manage during scaling
+- Format: `webhook-name:namespace` (namespace optional)
+- To find webhooks: `kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations`
+- Example: `webhook_names = aws-load-balancer-webhook:kube-system,kyverno-policy-webhook,cert-manager-webhook:cert-manager`
+
+**[timeouts]** - All timeout values in seconds
+- `webhook_timeout` - Webhook validation timeout (default: 60)
+- `drain_timeout` - Node drain timeout (default: 300) 
+- `pod_grace_period` - Pod termination grace period (default: 30)
+- `bootstrap_validation_timeout` - Bootstrap validation timeout (default: 600)
+- `dependency_startup_timeout` - Dependency startup timeout per tier (default: 300)
+- `kubectl_timeout` - kubectl command timeout (default: 120)
+- `aws_cli_timeout` - AWS CLI command timeout (default: 60)
+
+#### Important Changes:
+- **Multi-account support removed**: EKS scheduler now operates on single account only
+- **No accounts.json dependency**: Account configuration is no longer required
+- **Configurable exclusions**: Clusters can be excluded even if matched by tags
+- **Webhook names configurable**: No more hardcoded webhook assumptions
+- **All timeouts configurable**: Fine-tune all timeout values for your environment
+
 ### Configuration Files
-- `config/config.ini` - AWS region, SNS topics, tag filters, timeouts
-- `config/accounts.json` - Multi-account support
+- `config/config.ini` - AWS region, SNS topics, tag filters, timeouts, exclusions, webhook config
 - Each scheduler has separate configuration but follows same structure
 
 ### GitLab CI Pipeline

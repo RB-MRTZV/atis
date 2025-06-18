@@ -13,18 +13,19 @@ class EKSOperationError(Exception):
     pass
 
 class EKSOperations:
-    def __init__(self, region, dry_run=False):
+    def __init__(self, region, dry_run=False, config_manager=None):
         self.logger = logging.getLogger(__name__)
         self.region = region
         self.dry_run = dry_run
+        self.config_manager = config_manager
         self.eks_client = boto3.client('eks', region_name=region)
         self.state_manager = StateManager(dry_run=dry_run)
         
         # Initialize new management components
-        self.pod_manager = PodManager(dry_run=dry_run)
-        self.webhook_manager = WebhookManager(dry_run=dry_run)
-        self.bootstrap_validator = BootstrapValidator(dry_run=dry_run)
-        self.dependency_manager = DependencyManager(dry_run=dry_run)
+        self.pod_manager = PodManager(dry_run=dry_run, config_manager=config_manager)
+        self.webhook_manager = WebhookManager(dry_run=dry_run, config_manager=config_manager)
+        self.bootstrap_validator = BootstrapValidator(dry_run=dry_run, config_manager=config_manager)
+        self.dependency_manager = DependencyManager(dry_run=dry_run, config_manager=config_manager)
         
         if self.dry_run:
             self.logger.info("EKS Operations initialized in DRY RUN mode - no actual changes will be made")
@@ -50,7 +51,7 @@ class EKSOperations:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
-                timeout=60
+                timeout=self.config_manager.get_timeout('kubectl_timeout', 60) if self.config_manager else 60
             )
             
             success = result.returncode == 0
@@ -60,7 +61,7 @@ class EKSOperations:
             return success, result.stdout, result.stderr
             
         except subprocess.TimeoutExpired:
-            self.logger.error("kubectl command timed out after 60 seconds")
+            self.logger.error(f"kubectl command timed out after {self.config_manager.get_timeout('kubectl_timeout', 60) if self.config_manager else 60} seconds")
             return False, "", "Command timed out"
         except Exception as e:
             self.logger.error(f"Error running kubectl command: {str(e)}")
@@ -96,7 +97,7 @@ class EKSOperations:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
-                timeout=60
+                timeout=self.config_manager.get_timeout('aws_cli_timeout', 60) if self.config_manager else 60
             )
             
             success = result.returncode == 0
@@ -109,7 +110,7 @@ class EKSOperations:
                 return False
                 
         except subprocess.TimeoutExpired:
-            self.logger.error("AWS CLI command timed out after 60 seconds")
+            self.logger.error(f"AWS CLI command timed out after {self.config_manager.get_timeout('aws_cli_timeout', 60) if self.config_manager else 60} seconds")
             return False
         except Exception as e:
             self.logger.error(f"Error configuring kubectl for cluster {cluster_name}: {str(e)}")
@@ -130,12 +131,15 @@ class EKSOperations:
                 'ready_replicas': int
             }
         """
+        # Get autoscaler deployment name from config
+        autoscaler_name = self.config_manager.get_autoscaler_deployment_name() if self.config_manager else 'cluster-autoscaler'
+        
         # Common autoscaler deployment names and namespaces
         search_targets = [
-            ('kube-system', 'cluster-autoscaler'),
-            ('kube-system', 'cluster-autoscaler-aws-cluster-autoscaler'),
-            ('cluster-autoscaler', 'cluster-autoscaler'),
-            ('kube-system', 'aws-cluster-autoscaler')
+            ('kube-system', autoscaler_name),
+            ('kube-system', f'{autoscaler_name}-aws-{autoscaler_name}'),
+            ('cluster-autoscaler', autoscaler_name),
+            ('kube-system', f'aws-{autoscaler_name}')
         ]
         
         for namespace, deployment_name in search_targets:
@@ -626,7 +630,7 @@ class EKSOperations:
                 # Calculate expected total nodes
                 expected_nodes = sum(max(stored_configs.get(ng, {}).get('desiredSize', min_nodes), min_nodes) for ng in node_groups)
                 
-                if not self.bootstrap_validator.wait_for_nodes_ready(expected_nodes, timeout=600):
+                if not self.bootstrap_validator.wait_for_nodes_ready(expected_nodes, timeout=self.config_manager.get_timeout('bootstrap_validation_timeout', 600) if self.config_manager else 600):
                     self.logger.warning("Timeout waiting for all nodes to be ready - continuing with limited nodes")
             
             # Step 5: Uncordon nodes (in case they were cordoned during drain)
@@ -640,7 +644,7 @@ class EKSOperations:
             # Step 6: Validate system pod dependencies
             self.logger.info("Step 6: Validating system pod dependencies...")
             try:
-                dependency_validation_result = self.dependency_manager.validate_service_dependencies(timeout_per_tier=300)
+                dependency_validation_result = self.dependency_manager.validate_service_dependencies(timeout_per_tier=self.config_manager.get_timeout('dependency_startup_timeout', 300) if self.config_manager else 300)
                 self.logger.info("System pod dependency validation completed")
             except DependencyManagerError as e:
                 self.logger.error(f"Dependency validation failed: {str(e)}")
@@ -676,7 +680,7 @@ class EKSOperations:
             self.logger.info("Step 9: Final validation of webhook readiness...")
             if not self.dry_run:
                 try:
-                    if self.webhook_manager.validate_webhooks_ready(timeout=300):
+                    if self.webhook_manager.validate_webhooks_ready(timeout=self.config_manager.get_timeout('webhook_timeout', 300) if self.config_manager else 300):
                         self.logger.info("Webhook validation completed successfully")
                     else:
                         self.logger.warning("Some webhooks may not be fully ready")

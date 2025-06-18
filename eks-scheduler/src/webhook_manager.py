@@ -9,27 +9,80 @@ class WebhookManagerError(Exception):
     pass
 
 class WebhookManager:
-    def __init__(self, dry_run=False):
+    def __init__(self, dry_run=False, config_manager=None):
         self.logger = logging.getLogger(__name__)
         self.dry_run = dry_run
-        self.webhook_timeout = 60  # 60 seconds timeout for webhook checks
+        self.config_manager = config_manager
+        self.webhook_timeout = config_manager.get_timeout('webhook_timeout', 60) if config_manager else 60  # 60 seconds timeout for webhook checks
         
-        # Critical admission controllers that must be available
-        self.critical_webhooks = {
-            'kyverno': {
-                'namespace': 'kyverno',
-                'deployments': ['kyverno-admission-controller', 'kyverno-background-controller', 'kyverno-cleanup-controller'],
-                'webhooks': ['kyverno-policy-validating-webhook-cfg', 'kyverno-policy-mutating-webhook-cfg', 'kyverno-resource-validating-webhook-cfg', 'kyverno-resource-mutating-webhook-cfg']
-            },
-            'aws-load-balancer-controller': {
-                'namespace': 'kube-system',
-                'deployments': ['aws-load-balancer-controller'],
-                'webhooks': ['aws-load-balancer-webhook']
-            }
-        }
+        # Get webhook configuration from config manager
+        self.configured_webhooks = self._parse_webhook_config()
         
         if self.dry_run:
             self.logger.info("Webhook Manager initialized in DRY RUN mode")
+
+    def _parse_webhook_config(self):
+        """Parse webhook configuration from config manager.
+        
+        Returns:
+            list: List of tuples (webhook_name, namespace)
+        """
+        if not self.config_manager:
+            # Default webhooks if no config manager
+            return [
+                ('aws-load-balancer-webhook', 'kube-system'),
+                ('kyverno-policy-webhook', None),
+                ('kyverno-resource-webhook', None)
+            ]
+        
+        return self.config_manager.get_webhook_names()
+    
+    def _is_configured_webhook(self, webhook_name):
+        """Check if a webhook is in the configured list.
+        
+        Args:
+            webhook_name (str): Name of the webhook to check
+            
+        Returns:
+            bool: True if webhook is configured for management
+        """
+        for configured_name, namespace in self.configured_webhooks:
+            if configured_name.lower() in webhook_name.lower():
+                return True
+        return False
+    
+    def _get_deployment_name_for_webhook(self, webhook_name):
+        """Get the likely deployment name for a webhook.
+        
+        Args:
+            webhook_name (str): Name of the webhook
+            
+        Returns:
+            str: Likely deployment name or None
+        """
+        webhook_lower = webhook_name.lower()
+        
+        # Common webhook to deployment mappings
+        if 'aws-load-balancer' in webhook_lower:
+            return 'aws-load-balancer-controller'
+        elif 'kyverno' in webhook_lower:
+            if 'policy' in webhook_lower:
+                return 'kyverno-admission-controller'
+            elif 'resource' in webhook_lower:
+                return 'kyverno-admission-controller'
+            else:
+                return 'kyverno-admission-controller'
+        elif 'cert-manager' in webhook_lower:
+            return 'cert-manager'
+        elif 'istio' in webhook_lower:
+            return 'istiod'
+        else:
+            # For unknown webhooks, try to derive deployment name
+            # Remove common webhook suffixes
+            for suffix in ['-webhook', '-validating-webhook-cfg', '-mutating-webhook-cfg']:
+                if webhook_lower.endswith(suffix):
+                    return webhook_name[:-len(suffix)]
+            return webhook_name
 
     def _run_kubectl_command(self, command):
         """Execute kubectl command via subprocess."""
@@ -44,7 +97,7 @@ class WebhookManager:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
-                timeout=120
+                timeout=config_manager.get_timeout('kubectl_timeout', 120) if config_manager else 120
             )
             
             success = result.returncode == 0
@@ -269,14 +322,14 @@ class WebhookManager:
             # Get all validating webhooks
             validating_webhooks = self.get_validating_admission_webhooks()
             for webhook in validating_webhooks:
-                if any(critical in webhook['name'].lower() for critical in ['kyverno']):
+                if self._is_configured_webhook(webhook['name']):
                     if self._disable_webhook(webhook['name'], 'validatingadmissionwebhooks'):
                         disabled_webhooks.append(webhook['name'])
             
             # Get all mutating webhooks
             mutating_webhooks = self.get_mutating_admission_webhooks()
             for webhook in mutating_webhooks:
-                if any(critical in webhook['name'].lower() for critical in ['kyverno']):
+                if self._is_configured_webhook(webhook['name']):
                     if self._disable_webhook(webhook['name'], 'mutatingadmissionwebhooks'):
                         disabled_webhooks.append(webhook['name'])
             
@@ -356,14 +409,14 @@ class WebhookManager:
             # Get all validating webhooks
             validating_webhooks = self.get_validating_admission_webhooks()
             for webhook in validating_webhooks:
-                if any(critical in webhook['name'].lower() for critical in ['kyverno']):
+                if self._is_configured_webhook(webhook['name']):
                     if self._enable_webhook(webhook['name'], 'validatingadmissionwebhooks'):
                         enabled_webhooks.append(webhook['name'])
             
             # Get all mutating webhooks
             mutating_webhooks = self.get_mutating_admission_webhooks()
             for webhook in mutating_webhooks:
-                if any(critical in webhook['name'].lower() for critical in ['kyverno']):
+                if self._is_configured_webhook(webhook['name']):
                     if self._enable_webhook(webhook['name'], 'mutatingadmissionwebhooks'):
                         enabled_webhooks.append(webhook['name'])
             
@@ -444,11 +497,13 @@ class WebhookManager:
             while datetime.now() < timeout_time:
                 all_ready = True
                 
-                # Check all critical deployments
-                for system_name, config in self.critical_webhooks.items():
-                    for deployment in config['deployments']:
-                        if not self._check_deployment_ready(deployment, config['namespace']):
-                            self.logger.info(f"Waiting for {deployment} in {config['namespace']} to be ready...")
+                # Check configured webhook deployments 
+                for webhook_name, namespace in self.configured_webhooks:
+                    # Map webhook names to likely deployment names
+                    deployment_name = self._get_deployment_name_for_webhook(webhook_name)
+                    if deployment_name and namespace:
+                        if not self._check_deployment_ready(deployment_name, namespace):
+                            self.logger.info(f"Waiting for {deployment_name} in {namespace} to be ready...")
                             all_ready = False
                             break
                     
@@ -466,7 +521,7 @@ class WebhookManager:
                     webhook_health = True
                     
                     for webhook in all_webhooks:
-                        if any(critical in webhook['name'].lower() for critical in ['kyverno', 'aws-load-balancer']):
+                        if self._is_configured_webhook(webhook['name']):
                             if not self.check_webhook_endpoint_health(webhook):
                                 self.logger.warning(f"Webhook {webhook['name']} is not healthy")
                                 webhook_health = False
@@ -505,20 +560,19 @@ class WebhookManager:
             all_webhooks = validating_webhooks + mutating_webhooks
             
             for webhook in all_webhooks:
-                if any(critical in webhook['name'].lower() for critical in ['kyverno', 'aws-load-balancer']):
+                if self._is_configured_webhook(webhook['name']):
                     total_critical += 1
                     if self.check_webhook_endpoint_health(webhook):
                         healthy_count += 1
             
-            # Check critical deployments
+            # Check configured webhook deployments
             deployments_ready = True
-            for system_name, config in self.critical_webhooks.items():
-                for deployment in config['deployments']:
-                    if not self._check_deployment_ready(deployment, config['namespace']):
+            for webhook_name, namespace in self.configured_webhooks:
+                deployment_name = self._get_deployment_name_for_webhook(webhook_name)
+                if deployment_name and namespace:
+                    if not self._check_deployment_ready(deployment_name, namespace):
                         deployments_ready = False
                         break
-                if not deployments_ready:
-                    break
             
             return {
                 'validating_webhooks': len(validating_webhooks),

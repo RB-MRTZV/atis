@@ -9,11 +9,12 @@ class PodManagerError(Exception):
     pass
 
 class PodManager:
-    def __init__(self, dry_run=False):
+    def __init__(self, dry_run=False, config_manager=None):
         self.logger = logging.getLogger(__name__)
         self.dry_run = dry_run
-        self.drain_timeout = 300  # 5 minutes default timeout
-        self.grace_period = 30    # 30 seconds grace period for pod termination
+        self.config_manager = config_manager
+        self.drain_timeout = config_manager.get_timeout('drain_timeout', 300) if config_manager else 300  # 5 minutes default timeout
+        self.grace_period = config_manager.get_timeout('pod_grace_period', 30) if config_manager else 30    # 30 seconds grace period for pod termination
         
         if self.dry_run:
             self.logger.info("Pod Manager initialized in DRY RUN mode")

@@ -54,13 +54,12 @@ def parse_args():
     parser.add_argument('--min-nodes', type=int, default=1,
                         help='Minimum number of nodes when scaling up (default: 1)')
     parser.add_argument('--region', help='AWS region (defaults to config)')
-    parser.add_argument('--account', help='Account name to process')
     parser.add_argument('--dry-run', action='store_true', help='Simulate actions without executing')
     parser.add_argument('--notify-only', action='store_true', help='Send notification without performing actions')
     
     return parser.parse_args()
 
-def process_eks_cluster(eks_ops, cluster_name, min_nodes, action, args, account, region, reporter):
+def process_eks_cluster(eks_ops, cluster_name, min_nodes, action, args, region, reporter, config_manager):
     """Process a single EKS cluster.
     
     Args:
@@ -69,17 +68,33 @@ def process_eks_cluster(eks_ops, cluster_name, min_nodes, action, args, account,
         min_nodes: Minimum number of nodes for scaling up
         action: Action to perform (start/stop)
         args: Command line arguments
-        account: Account information
         region: AWS region
         reporter: Reporter instance
+        config_manager: ConfigManager instance
         
     Returns:
         int: Number of node groups processed
     """
     logger = logging.getLogger(__name__)
-    account_name = account['name'] if account else 'default'
     
-    logger.info(f"Processing cluster {cluster_name} in account {account_name}")
+    # Check if cluster is in exclusion list
+    excluded_clusters = config_manager.get_excluded_clusters()
+    if cluster_name in excluded_clusters:
+        logger.warning(f"Cluster {cluster_name} is in exclusion list, skipping")
+        reporter.add_result(
+            account='default',
+            region=region,
+            cluster_name=cluster_name,
+            previous_state='N/A',
+            new_state='EXCLUDED',
+            action=action,
+            timestamp=datetime.now().isoformat(),
+            status='Skipped',
+            error='Cluster in exclusion list'
+        )
+        return 0
+    
+    logger.info(f"Processing cluster {cluster_name}")
     
     # Execute the requested action (dry-run is handled in EKSOperations)
     if not args.notify_only:
@@ -95,7 +110,7 @@ def process_eks_cluster(eks_ops, cluster_name, min_nodes, action, args, account,
             node_groups_processed = 0
             for result in results:
                 reporter.add_result(
-                    account=account_name,
+                    account='default',
                     region=region,
                     cluster_name=cluster_name,
                     previous_state=result.get('PreviousState', 'Unknown'),
@@ -112,7 +127,7 @@ def process_eks_cluster(eks_ops, cluster_name, min_nodes, action, args, account,
         except EKSOperationError as e:
             logger.error(f"Error processing cluster {cluster_name}: {str(e)}")
             reporter.add_result(
-                account=account_name,
+                account='default',
                 region=region,
                 cluster_name=cluster_name,
                 previous_state='Unknown',
@@ -129,7 +144,7 @@ def process_eks_cluster(eks_ops, cluster_name, min_nodes, action, args, account,
         
         # Add entry for notify only
         reporter.add_result(
-            account=account_name,
+            account='default',
             region=region,
             cluster_name=cluster_name,
             previous_state='Unknown',
@@ -165,23 +180,6 @@ def main():
         region = args.region or config_manager.get('aws', 'region', fallback='us-west-2')
         logger.info(f"Using AWS region: {region}")
         
-        # Get account to process
-        account = None
-        if args.account:
-            account = config_manager.get_account_by_name(args.account)
-            if not account:
-                logger.error(f"Account '{args.account}' not found in configuration")
-                return 1
-        else:
-            # Use first account as default
-            accounts = config_manager.get_accounts()
-            account = accounts[0] if accounts else None
-            
-        if account:
-            logger.info(f"Processing account: {account['name']}")
-        else:
-            logger.warning("No account configuration found, using defaults")
-        
         # Log min nodes setting for scale up
         if args.action == 'start':
             logger.info(f"Minimum nodes for scale up: {args.min_nodes}")
@@ -190,11 +188,11 @@ def main():
         reporter = Reporter()
         
         # Initialize EKS operations
-        eks_ops = EKSOperations(region, dry_run=args.dry_run)
+        eks_ops = EKSOperations(region, dry_run=args.dry_run, config_manager=config_manager)
         
         # Process the cluster
         total_processed = process_eks_cluster(
-            eks_ops, args.cluster, args.min_nodes, args.action, args, account, region, reporter
+            eks_ops, args.cluster, args.min_nodes, args.action, args, region, reporter, config_manager
         )
         
         logger.info(f"Processed {total_processed} node groups in cluster {args.cluster}")

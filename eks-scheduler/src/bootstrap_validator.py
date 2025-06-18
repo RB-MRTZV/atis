@@ -9,10 +9,11 @@ class BootstrapValidatorError(Exception):
     pass
 
 class BootstrapValidator:
-    def __init__(self, dry_run=False):
+    def __init__(self, dry_run=False, config_manager=None):
         self.logger = logging.getLogger(__name__)
         self.dry_run = dry_run
-        self.validation_timeout = 600  # 10 minutes timeout for bootstrap validation
+        self.config_manager = config_manager
+        self.validation_timeout = config_manager.get_timeout('bootstrap_validation_timeout', 600) if config_manager else 600  # 10 minutes timeout for bootstrap validation
         
         # Critical system pods that must be ready before other workloads
         self.critical_system_pods = {

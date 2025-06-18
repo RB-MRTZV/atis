@@ -23,8 +23,9 @@ eks-scale-down:
     - python main.py --action stop --cluster $EKS_CLUSTER_NAME --region $AWS_DEFAULT_REGION
   artifacts:
     paths:
-      - eks-scheduler/src/state/  # Persist state files
-    expire_in: 7 days
+      - eks-scheduler/src/state/    # Persist state files
+      - eks-scheduler/src/reports/  # Persist reports  
+    expire_in: 1 week
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCALE_ACTION == "down"
     - when: manual
@@ -63,8 +64,9 @@ eks-scheduler:
       fi
   artifacts:
     paths:
-      - eks-scheduler/src/state/
-    expire_in: 7 days
+      - eks-scheduler/src/state/    # Persist state files
+      - eks-scheduler/src/reports/  # Persist reports
+    expire_in: 1 week
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - when: manual
@@ -104,8 +106,9 @@ eks-custom:
       fi
   artifacts:
     paths:
-      - eks-scheduler/src/state/
-    expire_in: 7 days
+      - eks-scheduler/src/state/    # Persist state files
+      - eks-scheduler/src/reports/  # Persist reports
+    expire_in: 1 week
   rules:
     - when: manual
   variables:
