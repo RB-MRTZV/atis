@@ -1,0 +1,380 @@
+stages:
+  - collect-dev
+  - collect-prod
+  - analyze
+  - report
+
+variables:
+  PYTHON_VERSION: "3.9"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip
+    - venv/
+
+before_script:
+  - python3 -m venv venv
+  - source venv/bin/activate
+  - pip install --upgrade pip
+  - pip install -r requirements.txt
+
+# Development Environment Data Collection
+collect-dev-data:
+  stage: collect-dev
+  image: python:${PYTHON_VERSION}
+  script:
+    - source venv/bin/activate
+    - mkdir -p output
+    - python scripts/aws_cost_data_collector.py --environment dev --region ${AWS_REGION:-us-east-1}
+  artifacts:
+    paths:
+      - output/aws_cost_data_dev_*.json
+    expire_in: 30 days
+    reports:
+      junit: output/test-results.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $ENVIRONMENT == "dev"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - when: manual
+  tags:
+    - aws-dev
+
+# Production Environment Data Collection
+collect-prod-data:
+  stage: collect-prod
+  image: python:${PYTHON_VERSION}
+  script:
+    - source venv/bin/activate
+    - mkdir -p output
+    - python scripts/aws_cost_data_collector.py --environment prod --region ${AWS_REGION:-us-east-1}
+  artifacts:
+    paths:
+      - output/aws_cost_data_prod_*.json
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $ENVIRONMENT == "prod"
+    - if: $CI_COMMIT_BRANCH == "main" && $MANUAL_PROD_COLLECTION == "true"
+    - when: manual
+  tags:
+    - aws-prod
+  allow_failure: false
+
+# Multi-region data collection for comprehensive analysis
+collect-multi-region:
+  stage: collect-dev
+  image: python:${PYTHON_VERSION}
+  parallel:
+    matrix:
+      - REGION: [us-east-1, us-west-2, eu-west-1, ap-southeast-1]
+  script:
+    - source venv/bin/activate
+    - mkdir -p output
+    - python scripts/aws_cost_data_collector.py --environment ${ENVIRONMENT:-dev} --region $REGION
+  artifacts:
+    paths:
+      - output/aws_cost_data_*_${REGION}_*.json
+    expire_in: 30 days
+  rules:
+    - if: $MULTI_REGION_COLLECTION == "true"
+    - when: manual
+  tags:
+    - aws-dev
+
+# Data analysis and cost optimization recommendations
+analyze-cost-data:
+  stage: analyze
+  image: python:${PYTHON_VERSION}
+  script:
+    - source venv/bin/activate
+    - echo "Running comprehensive cost analysis with Cost Explorer data..."
+    - python scripts/cost_analyzer.py
+    - |
+      echo "Generating summary report..."
+      python3 -c "
+      import json
+      import glob
+      from datetime import datetime
+      
+      # Load the detailed analysis
+      analysis_files = glob.glob('output/cost_analysis_detailed_*.json')
+      if not analysis_files:
+          print('No detailed analysis files found')
+          exit(1)
+      
+      latest_file = max(analysis_files)
+      with open(latest_file, 'r') as f:
+          analysis = json.load(f)
+      
+      # Create pipeline summary
+      summary = {
+          'pipeline_timestamp': datetime.now().isoformat(),
+          'total_monthly_cost': analysis['total_monthly_cost'],
+          'potential_savings': analysis['total_potential_savings'],
+          'savings_percentage': analysis['savings_percentage'],
+          'high_priority_recommendations': len(analysis['implementation_priority']['immediate']),
+          'total_recommendations': analysis['recommendations_count'],
+          'top_services_by_cost': dict(list(analysis['service_costs'].items())[:5])
+      }
+      
+      with open('output/pipeline_cost_summary.json', 'w') as f:
+          json.dump(summary, f, indent=2)
+      
+      print(f'Pipeline summary: ${summary[\"potential_savings\"]:.2f} monthly savings identified')
+      "
+  dependencies:
+    - collect-dev-data
+  artifacts:
+    paths:
+      - output/cost_analysis_detailed_*.json
+      - output/pipeline_cost_summary.json
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+
+# Generate human-readable cost optimization report
+generate-report:
+  stage: report
+  image: python:${PYTHON_VERSION}
+  script:
+    - source venv/bin/activate
+    - |
+      echo "Generating comprehensive cost optimization report..."
+      python3 -c "
+      import json
+      import glob
+      from datetime import datetime
+
+      # Load detailed analysis results
+      analysis_files = glob.glob('output/cost_analysis_detailed_*.json')
+      if not analysis_files:
+          print('No detailed analysis files found')
+          exit(1)
+      
+      latest_file = max(analysis_files)
+      with open(latest_file, 'r') as f:
+          analysis = json.load(f)
+      
+      # Generate comprehensive markdown report
+      report_md = f'''# AWS Cost Optimization Report
+
+**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+## Executive Summary
+
+- **Total Monthly Cost:** \${analysis['total_monthly_cost']:.2f}
+- **Potential Monthly Savings:** \${analysis['total_potential_savings']:.2f}
+- **Savings Percentage:** {analysis['savings_percentage']:.1f}%
+- **Accounts Analyzed:** {analysis['accounts_analyzed']}
+- **Total Recommendations:** {analysis['recommendations_count']}
+
+## Top Services by Cost
+
+'''
+      
+      for service, cost in list(analysis['service_costs'].items())[:10]:
+          report_md += f'- **{service}:** \${cost:.2f}/month\n'
+      
+      # Add Cost Optimization Hub summary if available
+      coh_summary_found = False
+      for account_data in analysis.get('accounts', {}).values() if isinstance(analysis.get('accounts', {}), dict) else []:
+          coh_data = account_data.get('cost_optimization_hub', {})
+          if coh_data.get('enrollment_status') == 'Active' and coh_data.get('summary', {}).get('total_recommendations', 0) > 0:
+              coh_summary_found = True
+              coh_summary = coh_data.get('summary', {})
+              report_md += f'''
+
+## AWS Cost Optimization Hub Insights
+
+- **Hub Status:** Active ✅
+- **AWS-Identified Recommendations:** {coh_summary.get('total_recommendations', 0)}
+- **AWS-Estimated Monthly Savings:** \${coh_summary.get('total_estimated_monthly_savings', 0):.2f}
+- **High-Impact Recommendations:** {coh_summary.get('high_impact_recommendations', 0)}
+
+**Recommendation Breakdown:**
+'''
+              for action_type, count in coh_summary.get('recommendations_by_type', {}).items():
+                  report_md += f'- {action_type}: {count} recommendations\n'
+              
+              report_md += '''
+
+**Implementation Effort Distribution:**
+'''
+              for effort_level, count in coh_summary.get('recommendations_by_effort', {}).items():
+                  report_md += f'- {effort_level}: {count} recommendations\n'
+              break
+      
+      if not coh_summary_found:
+          # Check for enrollment status
+          for account_data in analysis.get('accounts', {}).values() if isinstance(analysis.get('accounts', {}), dict) else []:
+              coh_data = account_data.get('cost_optimization_hub', {})
+              if coh_data.get('enrollment_status') in ['access_denied', 'service_unavailable']:
+                  report_md += f'''
+
+## AWS Cost Optimization Hub Status
+
+- **Hub Status:** {coh_data.get('enrollment_status', 'Unknown')} ⚠️
+- **Action Required:** Enable Cost Optimization Hub for additional AWS-generated recommendations
+
+'''
+                  break
+
+      report_md += '''
+
+## High Priority Recommendations (Immediate Action)
+
+'''
+      
+      for i, rec in enumerate(analysis['implementation_priority']['immediate'], 1):
+          # Add special formatting for Cost Optimization Hub recommendations
+          source_info = ''
+          if rec.get('source') == 'AWS Cost Optimization Hub':
+              effort = rec.get('implementation_effort', 'Unknown')
+              rollback = '✅' if rec.get('rollback_possible', False) else '❌'
+              restart = '⚠️' if rec.get('restart_needed', False) else '✅'
+              source_info = f'''
+- **Source:** AWS Cost Optimization Hub 🎯
+- **Implementation Effort:** {effort}
+- **Rollback Possible:** {rollback}
+- **Restart Required:** {restart}'''
+              if rec.get('recommendation_id'):
+                  source_info += f'''
+- **Recommendation ID:** `{rec['recommendation_id']}`'''
+          
+          report_md += f'''### {i}. {rec['service']}: {rec['recommendation']}
+- **Current Cost:** \${rec.get('current_cost', 0):.2f}/month
+- **Potential Savings:** {rec['potential_savings']}
+- **Environment:** {rec.get('environment', 'Unknown')}{source_info}
+
+**Implementation Steps:**
+'''
+          for step in rec.get('implementation', []):
+              report_md += f'- {step}\n'
+          report_md += '\n'
+      
+      report_md += '''
+## Medium Priority Recommendations (Short Term)
+
+'''
+      
+      for i, rec in enumerate(analysis['implementation_priority']['short_term'], 1):
+          report_md += f'''### {i}. {rec['service']}: {rec['recommendation']}
+- **Potential Savings:** {rec['potential_savings']}
+- **Environment:** {rec['environment']}
+
+'''
+      
+      report_md += f'''
+## Implementation Roadmap
+
+### Phase 1: Immediate Wins (0-30 days)
+{len(analysis['implementation_priority']['immediate'])} high-priority optimizations with estimated savings of \${sum(float(r.get('potential_savings', '\$0/month').replace('\$', '').replace('/month', '').split()[0]) for r in analysis['implementation_priority']['immediate']):.2f}/month
+
+### Phase 2: Architectural Changes (30-90 days)
+{len(analysis['implementation_priority']['short_term'])} medium-priority optimizations requiring more planning
+
+### Phase 3: Long-term Optimization (90+ days)
+{len(analysis['implementation_priority']['long_term'])} strategic changes for sustained cost reduction
+
+## Next Steps
+
+1. **Review and Approve:** Assess each high-priority recommendation for business impact
+2. **Implement Quick Wins:** Start with resource cleanup and retention policy changes
+3. **Plan Architecture Changes:** Schedule rightsizing and reservation purchases
+4. **Monitor Results:** Track cost changes after each implementation
+5. **Automate Monitoring:** Set up regular cost analysis runs
+
+## Support
+
+- Detailed analysis data: `{latest_file.split('/')[-1]}`
+- Pipeline summary: `pipeline_cost_summary.json`
+- For questions, review the implementation steps or consult AWS documentation
+
+---
+*This report was generated automatically by the AWS Cost Optimization Pipeline using Cost Explorer data*
+'''
+      
+      with open('output/cost_optimization_comprehensive_report.md', 'w') as f:
+          f.write(report_md)
+      
+      print(f'Comprehensive cost optimization report generated with \${analysis[\"total_potential_savings\"]:.2f} potential monthly savings')
+      "
+  dependencies:
+    - analyze-cost-data
+  artifacts:
+    paths:
+      - output/cost_optimization_comprehensive_report.md
+    expire_in: 90 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+
+# Scheduled pipeline for regular cost assessment
+cost-assessment-schedule:
+  stage: collect-dev
+  image: python:${PYTHON_VERSION}
+  script:
+    - echo "Running scheduled cost assessment..."
+    - source venv/bin/activate
+    - python scripts/aws_cost_data_collector.py --environment ${ENVIRONMENT:-dev}
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  tags:
+    - aws-dev
+
+# Security and validation checks
+validate-permissions:
+  stage: collect-dev
+  image: python:${PYTHON_VERSION}
+  script:
+    - source venv/bin/activate
+    - |
+      echo "Validating AWS permissions..."
+      python3 -c "
+      import boto3
+      from botocore.exceptions import ClientError
+      
+      def check_permissions():
+          try:
+              session = boto3.Session()
+              sts = session.client('sts')
+              identity = sts.get_caller_identity()
+              print(f'Connected as: {identity.get(\"Arn\", \"Unknown\")}')
+              
+              # Test read-only access to key services
+              services_to_test = ['ec2', 's3', 'logs', 'lambda', 'rds']
+              
+              for service in services_to_test:
+                  try:
+                      client = session.client(service)
+                      if service == 'ec2':
+                          client.describe_instances(MaxResults=1)
+                      elif service == 's3':
+                          client.list_buckets()
+                      elif service == 'logs':
+                          client.describe_log_groups(limit=1)
+                      elif service == 'lambda':
+                          client.list_functions(MaxItems=1)
+                      elif service == 'rds':
+                          client.describe_db_instances(MaxRecords=1)
+                      
+                      print(f'✓ {service.upper()} access validated')
+                  except ClientError as e:
+                      print(f'✗ {service.upper()} access failed: {e}')
+                      return False
+              
+              return True
+              
+          except Exception as e:
+              print(f'Permission validation failed: {e}')
+              return False
+      
+      if not check_permissions():
+          exit(1)
+      print('Permission validation completed successfully')
+      "
+  rules:
+    - when: manual
+  tags:
+    - aws-dev
