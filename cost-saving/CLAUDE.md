@@ -39,12 +39,20 @@ source venv/bin/activate
 
 **Data Collection:**
 ```bash
-# Collect AWS resource data with Cost Explorer analysis
-python scripts/aws_cost_data_collector.py --environment <dev|prod> --region <region> --cost-days <30|60>
+# Recommended: Use wrapper script (auto-detects boto3 issues and falls back to CLI)
+./collect_cost_data.sh --environment <dev|prod> --region <region> --cost-days <30|60>
+
+# Direct script usage:
+# boto3 version (original)
+python3 scripts/aws_cost_data_collector.py --environment <dev|prod> --region <region> --cost-days <30|60>
+
+# CLI-based version (use when boto3 version issues occur)
+python3 scripts/aws_cost_data_collector_cli.py --environment <dev|prod> --region <region> --cost-days <30|60>
 
 # Examples:
-python scripts/aws_cost_data_collector.py --environment dev --cost-days 30
-python scripts/aws_cost_data_collector.py --profile prod-profile --environment prod --cost-days 60
+./collect_cost_data.sh --environment dev --cost-days 30
+./collect_cost_data.sh --profile prod-profile --environment prod --cost-days 60
+./collect_cost_data.sh --use-cli --environment dev  # Force CLI version
 ```
 
 **Cost Analysis:**
