@@ -32,7 +32,7 @@ class PodManager:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
-                timeout=120
+                timeout=self.config_manager.get_timeout('kubectl_timeout', 120) if self.config_manager else 120
             )
             
             success = result.returncode == 0
@@ -55,10 +55,13 @@ class PodManager:
                 self.logger.info(f"[DRY RUN] Would get nodes for node group {node_group_name}")
                 return ["mock-node-1", "mock-node-2"]
             
+            # Get node label from config or use EKS default
+            node_label = self.config_manager.get('services', 'node_group_label', 'eks.amazonaws.com/nodegroup') if self.config_manager else 'eks.amazonaws.com/nodegroup'
+            
             # Get nodes with the node group label
             command = [
                 'kubectl', 'get', 'nodes', 
-                '-l', f'eks.amazonaws.com/nodegroup={node_group_name}',
+                '-l', f'{node_label}={node_group_name}',
                 '-o', 'jsonpath={.items[*].metadata.name}'
             ]
             

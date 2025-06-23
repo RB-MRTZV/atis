@@ -219,10 +219,10 @@ class BootstrapValidator:
                 self.logger.error("CoreDNS deployment is not ready")
                 return False
             
-            # Test DNS resolution
+            # Test DNS resolution without interactive flag
             test_command = [
-                'kubectl', 'run', 'dns-test', '--image=busybox:1.35', '--rm', '-it', '--restart=Never',
-                '--', 'nslookup', 'kubernetes.default.svc.cluster.local'
+                'kubectl', 'run', 'dns-test', '--image=busybox:1.35', '--rm', '--restart=Never',
+                '--command', '--', 'nslookup', 'kubernetes.default.svc.cluster.local'
             ]
             
             self.logger.info("Testing DNS resolution...")

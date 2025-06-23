@@ -224,8 +224,30 @@ class WebhookManager:
     def _check_kyverno_webhook_health(self):
         """Check Kyverno webhook service health."""
         try:
+            # Get service name from config or use default
+            service_name = self.config_manager.get('services', 'kyverno_webhook_service', 'kyverno-svc') if self.config_manager else 'kyverno-svc'
+            namespace = self.config_manager.get('services', 'kyverno_webhook_namespace', 'kyverno') if self.config_manager else 'kyverno'
+            
+            # First check if the service exists
+            check_command = ['kubectl', 'get', 'service', service_name, '-n', namespace, '-o', 'name']
+            check_success, _, _ = self._run_kubectl_command(check_command)
+            
+            if not check_success:
+                # Try alternative service names
+                alternative_services = ['kyverno-svc-metrics', 'kyverno-webhook-service', 'kyverno']
+                for alt_service in alternative_services:
+                    check_command = ['kubectl', 'get', 'service', alt_service, '-n', namespace, '-o', 'name']
+                    check_success, _, _ = self._run_kubectl_command(check_command)
+                    if check_success:
+                        service_name = alt_service
+                        break
+                
+                if not check_success:
+                    self.logger.warning(f"Kyverno webhook service not found in namespace {namespace}")
+                    return True  # Don't block if service doesn't exist
+            
             # Check if Kyverno webhook service has endpoints
-            command = ['kubectl', 'get', 'endpoints', 'kyverno-svc-metrics', '-n', 'kyverno', '-o', 'json']
+            command = ['kubectl', 'get', 'endpoints', service_name, '-n', namespace, '-o', 'json']
             success, stdout, stderr = self._run_kubectl_command(command)
             
             if success:
@@ -254,8 +276,31 @@ class WebhookManager:
     def _check_aws_lb_webhook_health(self):
         """Check AWS Load Balancer Controller webhook health."""
         try:
+            # Get service name from config or use default
+            service_name = self.config_manager.get('services', 'aws_lb_webhook_service', 'aws-load-balancer-webhook-service') if self.config_manager else 'aws-load-balancer-webhook-service'
+            namespace = self.config_manager.get('services', 'aws_lb_webhook_namespace', 'kube-system') if self.config_manager else 'kube-system'
+            
+            # First check if the service exists
+            check_command = ['kubectl', 'get', 'service', service_name, '-n', namespace, '-o', 'name']
+            check_success, _, _ = self._run_kubectl_command(check_command)
+            
+            if not check_success:
+                # Try alternative service names
+                alternative_services = ['aws-load-balancer-webhook', 'aws-lb-controller-webhook-service']
+                for alt_service in alternative_services:
+                    check_command = ['kubectl', 'get', 'service', alt_service, '-n', namespace, '-o', 'name']
+                    check_success, _, _ = self._run_kubectl_command(check_command)
+                    if check_success:
+                        service_name = alt_service
+                        break
+                
+                if not check_success:
+                    self.logger.info(f"AWS LB webhook service not found, checking deployment directly")
+                    # Webhook service might not exist, check if controller is running
+                    return self._check_deployment_ready('aws-load-balancer-controller', namespace)
+            
             # Check if AWS LB Controller webhook service has endpoints
-            command = ['kubectl', 'get', 'endpoints', 'aws-load-balancer-webhook-service', '-n', 'kube-system', '-o', 'json']
+            command = ['kubectl', 'get', 'endpoints', service_name, '-n', namespace, '-o', 'json']
             success, stdout, stderr = self._run_kubectl_command(command)
             
             if success:

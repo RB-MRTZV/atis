@@ -1,0 +1,87 @@
+[aws]
+# Default AWS region for EKS operations
+region = ap-southeast-2
+
+[sns]
+# SNS topic ARN for notifications (optional - leave empty to disable)
+# Format: arn:aws:sns:region:account-id:topic-name
+topic_arn = 
+
+[logging]
+# Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+level = INFO
+# Log file path (leave empty for console output only)
+file = 
+
+[exclusions]
+# List of EKS cluster names to exclude from scaling operations
+# Even if matched by name or tags, these clusters will be skipped
+# Example: production-critical,staging-critical,payment-processing
+excluded_clusters = 
+
+[autoscaler]
+# Name of the cluster autoscaler deployment
+# To find this, run: kubectl get deployments -n kube-system | grep autoscaler
+# Common names: cluster-autoscaler, cluster-autoscaler-aws, aws-cluster-autoscaler
+# If your cluster doesn't use autoscaler, leave this empty
+deployment_name = cluster-autoscaler
+
+[webhooks]
+# List of webhook names to manage during scaling operations
+# To find webhooks, run: kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations
+# Format: webhook-name:namespace (namespace is optional, defaults to searching all namespaces)
+# 
+# Common webhook names:
+# - aws-load-balancer-webhook:kube-system (AWS Load Balancer Controller)
+# - kyverno-policy-validating-webhook-cfg (Kyverno policies)
+# - kyverno-resource-validating-webhook-cfg (Kyverno resources)
+# - cert-manager-webhook:cert-manager (Cert Manager)
+# - istio-validator-istio-system:istio-system (Istio)
+# 
+# Leave empty if you don't use admission webhooks
+webhook_names = 
+
+[timeouts]
+# All timeout values in seconds - adjust based on cluster size and complexity
+
+# Webhook validation timeout - time to wait for webhooks to become ready
+webhook_timeout = 60
+
+# Node drain timeout - maximum time to wait for pods to evacuate from a node
+# Increase for clusters with many pods or slow pod termination
+drain_timeout = 300
+
+# Pod termination grace period - time given to pods to shut down gracefully
+pod_grace_period = 30
+
+# Bootstrap validation timeout - time to wait for critical system pods
+# Increase for large clusters or slow node provisioning
+bootstrap_validation_timeout = 600
+
+# Dependency startup timeout per tier - time for each service tier to start
+dependency_startup_timeout = 300
+
+# kubectl command timeout - for individual kubectl commands
+# Increase if you have a slow connection to the API server
+kubectl_timeout = 120
+
+# AWS CLI command timeout - for AWS API calls
+aws_cli_timeout = 60
+
+# Webhook validation timeout - total time to validate all webhooks
+webhook_validation_timeout = 300
+
+[services]
+# Service-specific configurations
+# These override hardcoded service names in the code
+
+# Kyverno webhook service endpoint (if different from default)
+# kyverno_webhook_service = kyverno-svc-metrics
+# kyverno_webhook_namespace = kyverno
+
+# AWS Load Balancer Controller webhook service (if different from default)
+# aws_lb_webhook_service = aws-load-balancer-webhook-service
+# aws_lb_webhook_namespace = kube-system
+
+# Node label used to identify node groups (for non-EKS clusters)
+# node_group_label = eks.amazonaws.com/nodegroup
