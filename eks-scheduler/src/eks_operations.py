@@ -13,16 +13,17 @@ class EKSOperationError(Exception):
     pass
 
 class EKSOperations:
-    def __init__(self, region, dry_run=False):
+    def __init__(self, region, config_manager=None, dry_run=False):
         self.logger = logging.getLogger(__name__)
         self.region = region
         self.dry_run = dry_run
+        self.config_manager = config_manager
         self.eks_client = boto3.client('eks', region_name=region)
         self.state_manager = StateManager(dry_run=dry_run)
         
         # Initialize new management components
         self.pod_manager = PodManager(dry_run=dry_run)
-        self.webhook_manager = WebhookManager(dry_run=dry_run)
+        self.webhook_manager = WebhookManager(config_manager=config_manager, dry_run=dry_run)
         self.bootstrap_validator = BootstrapValidator(dry_run=dry_run)
         self.dependency_manager = DependencyManager(dry_run=dry_run)
         

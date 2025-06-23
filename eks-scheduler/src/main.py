@@ -190,7 +190,7 @@ def main():
         reporter = Reporter()
         
         # Initialize EKS operations
-        eks_ops = EKSOperations(region, dry_run=args.dry_run)
+        eks_ops = EKSOperations(region, config_manager=config_manager, dry_run=args.dry_run)
         
         # Process the cluster
         total_processed = process_eks_cluster(

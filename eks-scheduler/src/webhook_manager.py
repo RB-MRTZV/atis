@@ -4,15 +4,25 @@ import subprocess
 import json
 import time
 from datetime import datetime, timedelta
+from config_manager import ConfigManager
 
 class WebhookManagerError(Exception):
     pass
 
 class WebhookManager:
-    def __init__(self, dry_run=False):
+    def __init__(self, config_manager=None, dry_run=False):
         self.logger = logging.getLogger(__name__)
         self.dry_run = dry_run
-        self.webhook_timeout = 60  # 60 seconds timeout for webhook checks
+        
+        # Initialize config manager if not provided
+        if config_manager is None:
+            config_manager = ConfigManager()
+            config_manager.load_config()
+        
+        self.config_manager = config_manager
+        
+        # Get webhook timeout from config, default to 60 seconds
+        self.webhook_timeout = int(self.config_manager.get('eks', 'webhook_timeout', fallback='60'))
         
         # Critical admission controllers that must be available
         self.critical_webhooks = {
@@ -429,9 +439,13 @@ class WebhookManager:
             self.logger.error(f"Error enabling webhook {webhook_name}: {str(e)}")
             return False
 
-    def validate_webhooks_ready(self, timeout=300):
+    def validate_webhooks_ready(self, timeout=None):
         """Validate that all critical webhooks are ready and healthy."""
         try:
+            # Use provided timeout or get from config, default to 300 seconds
+            if timeout is None:
+                timeout = int(self.config_manager.get('eks', 'webhook_validation_timeout', fallback='300'))
+            
             if self.dry_run:
                 self.logger.info(f"[DRY RUN] Would validate webhooks ready (timeout: {timeout}s)")
                 return True
