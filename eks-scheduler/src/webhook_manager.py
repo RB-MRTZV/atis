@@ -4,6 +4,7 @@ import subprocess
 import json
 import time
 from datetime import datetime, timedelta
+from config_manager import ConfigManager
 
 class WebhookManagerError(Exception):
     pass
@@ -12,8 +13,16 @@ class WebhookManager:
     def __init__(self, dry_run=False, config_manager=None):
         self.logger = logging.getLogger(__name__)
         self.dry_run = dry_run
+        
+        # Initialize config manager if not provided
+        if config_manager is None:
+            config_manager = ConfigManager()
+            config_manager.load_config()
+        
         self.config_manager = config_manager
-        self.webhook_timeout = config_manager.get_timeout('webhook_timeout', 60) if config_manager else 60  # 60 seconds timeout for webhook checks
+        
+        # Get webhook timeout from config, default to 60 seconds
+        self.webhook_timeout = self.config_manager.get_timeout('webhook_timeout', 60) if self.config_manager else 60
         
         # Get webhook configuration from config manager
         self.configured_webhooks = self._parse_webhook_config()
@@ -97,7 +106,7 @@ class WebhookManager:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
-                timeout=config_manager.get_timeout('kubectl_timeout', 120) if config_manager else 120
+                timeout=self.config_manager.get_timeout('kubectl_timeout', 120) if self.config_manager else 120
             )
             
             success = result.returncode == 0
@@ -482,9 +491,13 @@ class WebhookManager:
             self.logger.error(f"Error enabling webhook {webhook_name}: {str(e)}")
             return False
 
-    def validate_webhooks_ready(self, timeout=300):
+    def validate_webhooks_ready(self, timeout=None):
         """Validate that all critical webhooks are ready and healthy."""
         try:
+            # Use provided timeout or get from config, default to 300 seconds
+            if timeout is None:
+                timeout = int(self.config_manager.get('eks', 'webhook_validation_timeout', fallback='300'))
+            
             if self.dry_run:
                 self.logger.info(f"[DRY RUN] Would validate webhooks ready (timeout: {timeout}s)")
                 return True
