@@ -129,7 +129,7 @@ class WebhookManager:
                 self.logger.info("[DRY RUN] Would get ValidatingAdmissionWebhook configurations")
                 return ['kyverno-policy-validating-webhook-cfg', 'kyverno-resource-validating-webhook-cfg']
             
-            command = ['kubectl', 'get', 'validatingadmissionwebhooks', '-o', 'json']
+            command = ['kubectl', 'get', 'validatingwebhookconfigurations', '-o', 'json']
             success, stdout, stderr = self._run_kubectl_command(command)
             
             if success:
@@ -167,7 +167,7 @@ class WebhookManager:
                 self.logger.info("[DRY RUN] Would get MutatingAdmissionWebhook configurations")
                 return ['kyverno-policy-mutating-webhook-cfg', 'kyverno-resource-mutating-webhook-cfg']
             
-            command = ['kubectl', 'get', 'mutatingadmissionwebhooks', '-o', 'json']
+            command = ['kubectl', 'get', 'mutatingwebhookconfigurations', '-o', 'json']
             success, stdout, stderr = self._run_kubectl_command(command)
             
             if success:
@@ -339,10 +339,17 @@ class WebhookManager:
             if success:
                 try:
                     deployment_data = json.loads(stdout)
+                    spec = deployment_data.get('spec', {})
                     status = deployment_data.get('status', {})
                     
+                    spec_replicas = spec.get('replicas', 0)
                     replicas = status.get('replicas', 0)
                     ready_replicas = status.get('readyReplicas', 0)
+                    
+                    # If deployment is scaled to 0, it's intentionally disabled
+                    if spec_replicas == 0:
+                        self.logger.warning(f"Deployment {deployment_name} in {namespace} is scaled to 0 replicas")
+                        return False
                     
                     is_ready = replicas > 0 and ready_replicas == replicas
                     

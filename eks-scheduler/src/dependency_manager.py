@@ -156,9 +156,16 @@ class DependencyManager:
                     deployment_data = json.loads(stdout)
                     status = deployment_data.get('status', {})
                     
+                    spec = deployment_data.get('spec', {})
+                    spec_replicas = spec.get('replicas', 0)
                     replicas = status.get('replicas', 0)
                     ready_replicas = status.get('readyReplicas', 0)
                     available_replicas = status.get('availableReplicas', 0)
+                    
+                    # If deployment is scaled to 0, it's intentionally disabled
+                    if spec_replicas == 0:
+                        self.logger.warning(f"Deployment {deployment_name} in {namespace} is scaled to 0 replicas - treating as not ready")
+                        return False
                     
                     # Check if deployment meets minimum requirements
                     is_ready = (ready_replicas >= min_replicas and 

@@ -232,6 +232,12 @@ class EKSOperations:
                     self.logger.info(f"[DRY RUN] Would disable cluster autoscaler by scaling to 0 replicas")
                     return {'status': 'success', 'action': 'disabled', 'dry_run': True}
                 else:
+                    # Check if autoscaler is already at 0 replicas
+                    if autoscaler_info['replicas'] == 0:
+                        self.logger.info(f"Cluster autoscaler already disabled (0 replicas), storing state")
+                        # Still store the state so we know it was originally at 0
+                        return {'status': 'success', 'action': 'already_disabled', 'replicas': 0}
+                    
                     command = [
                         'kubectl', 'scale', 'deployment', autoscaler_info['deployment_name'],
                         '-n', autoscaler_info['namespace'],
@@ -258,6 +264,13 @@ class EKSOperations:
                 if not stored_config:
                     self.logger.warning("No stored autoscaler configuration found, skipping restore")
                     return {'status': 'skipped', 'reason': 'no_stored_config'}
+                
+                # Check if autoscaler should remain at 0 replicas
+                if stored_config['original_replicas'] == 0:
+                    self.logger.info(f"Cluster autoscaler was originally at 0 replicas, keeping it disabled")
+                    # Still clear the stored config
+                    self.state_manager.clear_autoscaler_config(cluster_name)
+                    return {'status': 'success', 'action': 'kept_disabled', 'replicas': 0}
                 
                 # Restore autoscaler to original replica count
                 command = [
