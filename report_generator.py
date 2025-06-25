@@ -417,6 +417,24 @@ class ReportGenerator:
         }}
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Fallback for offline usage - provide basic chart functionality if Chart.js fails to load
+        window.addEventListener('load', function() {{
+            if (typeof Chart === 'undefined') {{
+                console.warn('Chart.js failed to load. Charts will be hidden for offline usage.');
+                // Hide chart containers if Chart.js is not available
+                document.querySelectorAll('.chart-container, .charts, .chart-row').forEach(el => {{
+                    el.style.display = 'none';
+                }});
+                // Show a message to the user
+                const chartsSection = document.querySelector('.charts');
+                if (chartsSection) {{
+                    chartsSection.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;">Charts require internet connection for Chart.js library. All data is available in the tables below.</p>';
+                    chartsSection.style.display = 'block';
+                }}
+            }}
+        }});
+    </script>
 </head>
 <body>
     <div class="header">

@@ -25,6 +25,30 @@ python generate_standalone_dashboard.py
 # Run with verbose logging
 python aws_cost_analyzer.py -v
 
+### Local Usage Without Web Server
+
+All generated reports are designed to work locally without requiring a web server:
+
+```bash
+# After generating reports, you can directly open any of these files in your browser:
+
+# Individual account HTML reports (in reports/ directory)
+open reports/cost_report_<account_id>.html
+
+# Multi-account dashboard (requires web server for data loading)
+python -m http.server 8080
+# Then navigate to http://localhost:8080/dashboard.html
+
+# Standalone dashboard (no web server needed)
+open dashboard_standalone.html
+```
+
+**CORS Handling:**
+- Individual account reports embed all data inline - work completely offline
+- Dashboard files have embedded data when generated as standalone
+- Fallback functionality provided when Chart.js cannot load (offline usage)
+- All data tables remain functional even when charts are unavailable
+
 ### Updating AWS Pricing Data
 
 ```bash
