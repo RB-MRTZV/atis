@@ -1,7 +1,9 @@
+#Prevent the following directories from being tracked by git
 __pycache__
 reports
 .claude
 CLAUDE.md
+
 
 
 
