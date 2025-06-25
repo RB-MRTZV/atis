@@ -59,7 +59,6 @@ class AWSResourceScanner:
                         
                         tags = instance.get('Tags', [])
                         environment = self._get_tag_value(tags, 'environment') or 'unknown'
-                        is_ephemeral = self._get_tag_value(tags, 'ConsumerManaged') == 'true'
                         
                         # Check if instance is in ASG
                         in_asg = False
@@ -74,12 +73,27 @@ class AWSResourceScanner:
                         except:
                             pass
                         
+                        # Determine instance type based on ASG membership and naming
+                        instance_name = self._get_tag_value(tags, 'Name') or ''
+                        if in_asg and asg_name:
+                            # Check if ASG name or instance name contains 'eks' (case-insensitive)
+                            if 'eks' in asg_name.lower() or 'eks' in instance_name.lower():
+                                instance_type_classification = 'EKS Managed Node'
+                                is_ephemeral = False
+                            else:
+                                instance_type_classification = 'Ephemeral'
+                                is_ephemeral = True
+                        else:
+                            # Not in ASG - default to Managed
+                            instance_type_classification = 'Managed'
+                            is_ephemeral = False
+                        
                         instance_data = {
                             'instance_id': instance['InstanceId'],
                             'instance_type': instance['InstanceType'],
                             'environment': environment,
                             'is_ephemeral': is_ephemeral,
-                            'type': 'Ephemeral' if is_ephemeral else 'Managed',
+                            'type': instance_type_classification,
                             'in_asg': in_asg,
                             'asg_name': asg_name,
                             'availability_zone': instance['Placement']['AvailabilityZone'],

@@ -35,6 +35,9 @@ All generated reports are designed to work locally without requiring a web serve
 # Individual account HTML reports (in reports/ directory)
 open reports/cost_report_<account_id>.html
 
+# Excel reports with multiple sheets and filters (in reports/excel/ directory)
+open reports/excel/cost_report_<account_id>.xlsx
+
 # Multi-account dashboard (requires web server for data loading)
 python -m http.server 8080
 # Then navigate to http://localhost:8080/dashboard.html
@@ -119,6 +122,7 @@ The AWS Cost Analyzer is a modular Python application that scans AWS resources a
 AWS API → Scanner → JSON scan results → Cost Estimator → JSON cost data → Report Generator → Multiple outputs
                                                                                             ├── HTML reports
                                                                                             ├── CSV exports
+                                                                                            ├── Excel reports
                                                                                             └── JSON data files
 ```
 
@@ -132,6 +136,10 @@ AWS API → Scanner → JSON scan results → Cost Estimator → JSON cost data 
 ### Key Design Patterns
 
 - **Environment Tagging**: Resources are grouped by 'environment' tag
-- **Resource Classification**: EC2 instances marked with 'ConsumerManaged=true' are flagged as ephemeral
+- **Resource Classification**: EC2 instance types are determined by Auto Scaling Group (ASG) membership:
+  - **Ephemeral**: Instances in ASG without 'eks' in ASG name or instance name
+  - **EKS Managed Nodes**: Instances in ASG with 'eks' in ASG name or instance name
+  - **Managed**: Instances not in any ASG (default)
 - **Cost Configuration**: Pricing data is externalized in cost_config.json
 - **Modular Design**: Each component can run independently for debugging/testing
+- **Multi-Format Reports**: Generates HTML (interactive), CSV (data analysis), and Excel (filtered views) formats

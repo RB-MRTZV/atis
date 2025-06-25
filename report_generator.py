@@ -73,6 +73,159 @@ class ReportGenerator:
         
         logger.info(f"CSV reports generated: {output_file}, {summary_file}")
     
+    def generate_excel_report(self, output_file=None):
+        """Generate Excel report with multiple sheets and filters"""
+        import openpyxl
+        from openpyxl.styles import PatternFill, Font, Border, Side
+        from openpyxl.utils.dataframe import dataframe_to_rows
+        
+        # Auto-generate filename based on account ID if not provided
+        if output_file is None:
+            account_id = self.results.get('metadata', {}).get('account_id', 'unknown')
+            output_file = f'reports/excel/cost_report_{account_id}.xlsx'
+        
+        logger.info(f"Generating Excel report: {output_file}")
+        
+        # Create workbook
+        wb = openpyxl.Workbook()
+        
+        # Remove default sheet
+        wb.remove(wb.active)
+        
+        # Get data
+        detailed_data = self.results.get('detailed', [])
+        summary_data = self.results.get('summary', {})
+        metadata = self.results.get('metadata', {})
+        
+        if not detailed_data:
+            logger.warning("No detailed data found")
+            return
+        
+        # Convert to DataFrames for easier manipulation
+        df = pd.DataFrame(detailed_data)
+        
+        # Define styles
+        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True)
+        border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                       top=Side(style='thin'), bottom=Side(style='thin'))
+        
+        # Create Overview sheet
+        overview_ws = wb.create_sheet("Overview")
+        overview_data = [
+            ["AWS Cost Analysis Report"],
+            ["Generated:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+            ["Account ID:", metadata.get('account_id', 'N/A')],
+            ["Account Name:", metadata.get('account_name', 'N/A')],
+            ["Region:", metadata.get('region', 'N/A')],
+            [""],
+            ["Summary by Service:"]
+        ]
+        
+        if isinstance(summary_data, list):
+            for item in summary_data:
+                if isinstance(item, dict) and 'monthly_cost' in item:
+                    service = item.get('service', 'Unknown')
+                    cost = item.get('monthly_cost', 0)
+                    overview_data.append([f"{service}:", f"${cost:.2f}"])
+        elif isinstance(summary_data, dict):
+            for service, totals in summary_data.items():
+                if isinstance(totals, dict) and 'monthly_cost' in totals:
+                    overview_data.append([f"{service}:", f"${totals['monthly_cost']:.2f}"])
+        
+        for row_idx, row_data in enumerate(overview_data, 1):
+            for col_idx, value in enumerate(row_data, 1):
+                overview_ws.cell(row=row_idx, column=col_idx, value=value)
+        
+        # Create All Resources sheet
+        all_ws = wb.create_sheet("All Resources")
+        
+        # Add headers
+        headers = ['Service', 'Resource ID', 'Instance Type', 'Environment', 
+                  'Type', 'Hourly Cost', 'Daily Cost', 'Monthly Cost', 'Currency']
+        
+        for col_idx, header in enumerate(headers, 1):
+            cell = all_ws.cell(row=1, column=col_idx, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = border
+        
+        # Add data
+        for row_idx, item in enumerate(detailed_data, 2):
+            all_ws.cell(row=row_idx, column=1, value=item.get('service'))
+            all_ws.cell(row=row_idx, column=2, value=item.get('resource_id'))
+            all_ws.cell(row=row_idx, column=3, value=item.get('instance_type'))
+            all_ws.cell(row=row_idx, column=4, value=item.get('environment'))
+            all_ws.cell(row=row_idx, column=5, value=item.get('type'))
+            all_ws.cell(row=row_idx, column=6, value=item.get('hourly_cost'))
+            all_ws.cell(row=row_idx, column=7, value=item.get('daily_cost'))
+            all_ws.cell(row=row_idx, column=8, value=item.get('monthly_cost'))
+            all_ws.cell(row=row_idx, column=9, value=item.get('currency', 'USD'))
+        
+        # Auto-adjust column widths
+        for column in all_ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            adjusted_width = min(max_length + 2, 50)
+            all_ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # Add AutoFilter
+        all_ws.auto_filter.ref = f"A1:{chr(65 + len(headers) - 1)}{len(detailed_data) + 1}"
+        
+        # Create service-specific sheets
+        services = df['service'].unique()
+        for service in services:
+            service_data = df[df['service'] == service]
+            ws = wb.create_sheet(f"{service} Resources")
+            
+            # Get service-specific columns
+            service_columns = ['resource_id', 'instance_type', 'environment', 'type', 
+                             'hourly_cost', 'daily_cost', 'monthly_cost']
+            
+            # Add service-specific fields
+            if service == 'EC2':
+                service_columns.extend(['in_asg', 'asg_name'])
+            elif service == 'RDS':
+                service_columns.extend(['engine', 'multi_az', 'storage_type'])
+            elif service == 'EKS':
+                service_columns.extend(['cluster_name', 'nodegroup_name'])
+            
+            # Filter columns that exist in the data
+            available_columns = [col for col in service_columns if col in service_data.columns]
+            service_df = service_data[available_columns]
+            
+            # Add headers
+            for col_idx, header in enumerate(available_columns, 1):
+                cell = ws.cell(row=1, column=col_idx, value=header.replace('_', ' ').title())
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.border = border
+            
+            # Add data
+            for row_idx, (_, row) in enumerate(service_df.iterrows(), 2):
+                for col_idx, value in enumerate(row, 1):
+                    ws.cell(row=row_idx, column=col_idx, value=value)
+            
+            # Auto-adjust column widths
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    if cell.value:
+                        max_length = max(max_length, len(str(cell.value)))
+                adjusted_width = min(max_length + 2, 50)
+                ws.column_dimensions[column_letter].width = adjusted_width
+            
+            # Add AutoFilter
+            ws.auto_filter.ref = f"A1:{chr(65 + len(available_columns) - 1)}{len(service_df) + 1}"
+        
+        # Save workbook
+        wb.save(output_file)
+        logger.info(f"Excel report generated: {output_file}")
+    
     def generate_html_report(self, output_file=None):
         """Generate HTML report with styled tables and charts"""
         metadata = self.results.get('metadata', {})
@@ -191,6 +344,9 @@ class ReportGenerator:
         }}
         .ec2-ephemeral {{
             color: #43a047;
+        }}
+        .ec2-eks-managed-node {{
+            color: #ff9800;
         }}
         .charts {{
             display: grid;
@@ -723,7 +879,13 @@ class ReportGenerator:
         <tbody>
 """
             for item in ec2_data:
-                type_class = 'ec2-ephemeral' if item.get('type') == 'Ephemeral' else 'ec2-managed'
+                instance_type = item.get('type', 'Managed')
+                if instance_type == 'Ephemeral':
+                    type_class = 'ec2-ephemeral'
+                elif instance_type == 'EKS Managed Node':
+                    type_class = 'ec2-eks-managed-node'
+                else:
+                    type_class = 'ec2-managed'
                 html_content += f"""
             <tr class="detail-row" data-service="EC2" data-environment="{item['environment']}" data-instance-type="{item['instance_type']}" data-monthly-cost="{item['monthly_cost']}">
                 <td>{item['resource_id']}</td>

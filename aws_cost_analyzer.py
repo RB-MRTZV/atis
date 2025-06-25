@@ -44,6 +44,7 @@ class AWSCostAnalyzer:
             'reports',
             'reports/data', 
             'reports/csv',
+            'reports/excel',
             'logs'
         ]
         
@@ -98,6 +99,10 @@ class AWSCostAnalyzer:
             # Generate CSV reports
             generator.generate_csv_report()
             logger.info("CSV reports generated")
+            
+            # Generate Excel report
+            generator.generate_excel_report()
+            logger.info("Excel report generated")
             
             # Generate HTML report
             generator.generate_html_report()
