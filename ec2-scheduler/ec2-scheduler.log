@@ -1,0 +1,52 @@
+2025-06-27 03:45:37,973 - __main__ - INFO - Starting EC2 Scheduler with ASG support - action: start
+2025-06-27 03:45:37,973 - __main__ - INFO - Using AWS region: ap-southeast-2
+2025-06-27 03:45:37,973 - __main__ - INFO - Using tag filter: scheduled:enabled
+2025-06-27 03:45:37,973 - __main__ - INFO - Using ASG identification tag: asg-managed:enabled
+2025-06-27 03:45:38,011 - botocore.credentials - INFO - Found credentials from IAM Role: StagingWebServers
+2025-06-27 03:45:38,673 - ec2_operations - INFO - Finding instances with tag scheduled:enabled
+2025-06-27 03:45:38,851 - ec2_operations - INFO - Found 2 tagged instances
+2025-06-27 03:45:38,851 - __main__ - INFO - Found 2 tagged instances: 0 regular, 0 ASG-managed (target: asg)
+2025-06-27 03:45:38,851 - __main__ - INFO - DRY RUN mode - Displaying instances that would be affected
+2025-06-27 03:45:38,851 - __main__ - INFO - Processed 0 instances
+2025-06-27 03:45:38,851 - __main__ - INFO - No resources processed, no reports generated
+2025-06-27 03:45:38,852 - __main__ - INFO - EC2 Scheduler completed successfully
+2025-06-27 03:45:45,643 - __main__ - INFO - Starting EC2 Scheduler with ASG support - action: start
+2025-06-27 03:45:45,643 - __main__ - INFO - Using AWS region: ap-southeast-2
+2025-06-27 03:45:45,644 - __main__ - INFO - Using tag filter: scheduled:enabled
+2025-06-27 03:45:45,644 - __main__ - INFO - Using ASG identification tag: asg-managed:enabled
+2025-06-27 03:45:45,667 - botocore.credentials - INFO - Found credentials from IAM Role: StagingWebServers
+2025-06-27 03:45:45,819 - ec2_operations - INFO - Finding instances with tag scheduled:enabled
+2025-06-27 03:45:45,924 - ec2_operations - INFO - Found 2 tagged instances
+2025-06-27 03:45:45,925 - __main__ - INFO - Found 2 tagged instances: 2 regular, 0 ASG-managed (target: ec2)
+2025-06-27 03:45:45,925 - __main__ - INFO - DRY RUN mode - Displaying instances that would be affected
+2025-06-27 03:45:45,925 - __main__ - INFO - Processed 2 instances
+2025-06-27 03:45:45,925 - __main__ - INFO - Generating reports
+2025-06-27 03:45:45,934 - reporting - INFO - Dry-run artifact generated: reports/dry-run-summary_20250627_034545.txt
+2025-06-27 03:45:45,934 - __main__ - INFO - Dry-run artifact generated: reports/dry-run-summary_20250627_034545.txt
+2025-06-27 03:45:45,942 - reporting - INFO - CSV report generated: reports/scheduler_report_20250627_034545.csv
+2025-06-27 03:45:45,949 - reporting - INFO - JSON report generated: reports/scheduler_report_20250627_034545.json
+2025-06-27 03:45:45,958 - reporting - INFO - Table report generated: reports/scheduler_report_20250627_034545.txt
+2025-06-27 03:45:45,967 - reporting - INFO - HTML report generated: reports/scheduler_report_20250627_034545.html
+2025-06-27 03:45:45,967 - __main__ - INFO - Reports generated: reports/scheduler_report_20250627_034545.csv, reports/scheduler_report_20250627_034545.json, reports/scheduler_report_20250627_034545.html
+2025-06-27 03:45:45,967 - __main__ - WARNING - No SNS topic ARN configured, skipping notification
+2025-06-27 03:45:45,967 - __main__ - INFO - EC2 Scheduler completed successfully
+2025-06-27 03:45:52,398 - __main__ - INFO - Starting EC2 Scheduler with ASG support - action: stop
+2025-06-27 03:45:52,398 - __main__ - INFO - Using AWS region: ap-southeast-2
+2025-06-27 03:45:52,398 - __main__ - INFO - Using tag filter: scheduled:enabled
+2025-06-27 03:45:52,398 - __main__ - INFO - Using ASG identification tag: asg-managed:enabled
+2025-06-27 03:45:52,423 - botocore.credentials - INFO - Found credentials from IAM Role: StagingWebServers
+2025-06-27 03:45:52,576 - ec2_operations - INFO - Finding instances with tag scheduled:enabled
+2025-06-27 03:45:52,672 - ec2_operations - INFO - Found 2 tagged instances
+2025-06-27 03:45:52,672 - __main__ - INFO - Found 2 tagged instances: 2 regular, 0 ASG-managed (target: both)
+2025-06-27 03:45:52,672 - __main__ - INFO - DRY RUN mode - Displaying instances that would be affected
+2025-06-27 03:45:52,673 - __main__ - INFO - Processed 2 instances
+2025-06-27 03:45:52,673 - __main__ - INFO - Generating reports
+2025-06-27 03:45:52,681 - reporting - INFO - Dry-run artifact generated: reports/dry-run-summary_20250627_034552.txt
+2025-06-27 03:45:52,681 - __main__ - INFO - Dry-run artifact generated: reports/dry-run-summary_20250627_034552.txt
+2025-06-27 03:45:52,688 - reporting - INFO - CSV report generated: reports/scheduler_report_20250627_034552.csv
+2025-06-27 03:45:52,696 - reporting - INFO - JSON report generated: reports/scheduler_report_20250627_034552.json
+2025-06-27 03:45:52,704 - reporting - INFO - Table report generated: reports/scheduler_report_20250627_034552.txt
+2025-06-27 03:45:52,715 - reporting - INFO - HTML report generated: reports/scheduler_report_20250627_034552.html
+2025-06-27 03:45:52,715 - __main__ - INFO - Reports generated: reports/scheduler_report_20250627_034552.csv, reports/scheduler_report_20250627_034552.json, reports/scheduler_report_20250627_034552.html
+2025-06-27 03:45:52,715 - __main__ - WARNING - No SNS topic ARN configured, skipping notification
+2025-06-27 03:45:52,715 - __main__ - INFO - EC2 Scheduler completed successfully

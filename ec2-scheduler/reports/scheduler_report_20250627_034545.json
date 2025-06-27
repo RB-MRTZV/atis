@@ -1,0 +1,33 @@
+{
+  "timestamp": "2025-06-27T03:45:45.946415",
+  "results": [
+    {
+      "ResourceType": "EC2",
+      "Account": "current",
+      "Region": "ap-southeast-2",
+      "ResourceId": "i-004f01a439f80ab66",
+      "Name": "VPN-Test",
+      "PreviousState": "running",
+      "NewState": "running",
+      "Action": "start",
+      "Timestamp": "2025-06-27T03:45:45.925272",
+      "Status": "No Change Needed",
+      "Error": "",
+      "Details": "Environment: VPN-Test"
+    },
+    {
+      "ResourceType": "EC2",
+      "Account": "current",
+      "Region": "ap-southeast-2",
+      "ResourceId": "i-0509dcd40a6d931ab",
+      "Name": "PR",
+      "PreviousState": "running",
+      "NewState": "running",
+      "Action": "start",
+      "Timestamp": "2025-06-27T03:45:45.925286",
+      "Status": "No Change Needed",
+      "Error": "",
+      "Details": "Environment: "
+    }
+  ]
+}

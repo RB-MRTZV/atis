@@ -254,15 +254,28 @@ def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg
                 
                 try:
                     if action == 'start':
-                        result = asg_ops.handle_asg_instance_start(instance_id)
+                        result = asg_ops.handle_asg_instance_start(
+                            instance_id, 
+                            verify=args.verify, 
+                            status_check_level=args.status_checks
+                        )
                     else:  # stop
-                        result = asg_ops.handle_asg_instance_stop(instance_id)
+                        result = asg_ops.handle_asg_instance_stop(
+                            instance_id, 
+                            verify=args.verify, 
+                            status_check_level=args.status_checks
+                        )
                     
                     # Prepare environment tag information for details
-                    environment_info = f"Environment: {instance.get('Environment', 'Unknown')}"
+                    environment_info = f"Environment: {instance.get('Environment', 'Unknown')}, ASG-managed"
+                    
+                    # Add verification details if present
+                    if 'VerificationDetails' in result and result['VerificationDetails']:
+                        verification_details = result['VerificationDetails']
+                        environment_info += f", Verification: {verification_details.get('summary', 'completed')}"
                     
                     reporter.add_result(
-                        resource_type='EC2',
+                        resource_type='EC2-ASG',
                         account='current',
                         region=region,
                         resource_id=instance_id,

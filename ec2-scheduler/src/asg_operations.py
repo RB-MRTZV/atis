@@ -244,11 +244,13 @@ class ASGOperations:
                 'Timestamp': datetime.now().isoformat()
             }
     
-    def handle_asg_instance_stop(self, instance_id):
-        """Handle stopping an ASG-managed instance (suspend processes first).
+    def handle_asg_instance_stop(self, instance_id, verify=False, status_check_level='state'):
+        """Handle stopping an ASG-managed instance (suspend processes first) with optional verification.
         
         Args:
             instance_id (str): Instance ID to stop
+            verify (bool): Whether to verify instance state after stopping
+            status_check_level (str): Level of status checks ('state' only for stopped instances)
             
         Returns:
             dict: Result of operation
@@ -312,7 +314,34 @@ class ASGOperations:
                     response = self.ec2_client.stop_instances(InstanceIds=[instance_id])
                     instance_info = response['StoppingInstances'][0]
                     
-                    return {
+                    # Perform verification if requested
+                    verification_result = None
+                    if verify:
+                        self.logger.info(f"Verifying ASG instance {instance_id} stopped state")
+                        
+                        # Wait for instance to be stopped first
+                        self.logger.info(f"Waiting for instance {instance_id} to be stopped...")
+                        waiter = self.ec2_client.get_waiter('instance_stopped')
+                        waiter.wait(InstanceIds=[instance_id], WaiterConfig={'Delay': 15, 'MaxAttempts': 40})
+                        
+                        verification_result = self.verify_asg_instance_state(
+                            instance_id, 'stopped', status_check_level
+                        )
+                        
+                        if not verification_result['passed']:
+                            return {
+                                'InstanceId': instance_id,
+                                'ASGName': asg_name,
+                                'PreviousState': instance_info['PreviousState']['Name'],
+                                'CurrentState': instance_info['CurrentState']['Name'],
+                                'Status': 'Verification Failed',
+                                'Error': f"Verification failed: {verification_result['summary']}",
+                                'ProcessesSuspended': True,
+                                'VerificationDetails': verification_result,
+                                'Timestamp': datetime.now().isoformat()
+                            }
+                    
+                    result = {
                         'InstanceId': instance_id,
                         'ASGName': asg_name,
                         'PreviousState': instance_info['PreviousState']['Name'],
@@ -321,6 +350,11 @@ class ASGOperations:
                         'ProcessesSuspended': True,
                         'Timestamp': datetime.now().isoformat()
                     }
+                    
+                    if verify:
+                        result['VerificationDetails'] = verification_result
+                    
+                    return result
                     
                 except botocore.exceptions.ClientError as e:
                     return {
@@ -349,11 +383,13 @@ class ASGOperations:
                 'Timestamp': datetime.now().isoformat()
             }
     
-    def handle_asg_instance_start(self, instance_id):
-        """Handle starting an ASG-managed instance and resume processes if needed.
+    def handle_asg_instance_start(self, instance_id, verify=False, status_check_level='state'):
+        """Handle starting an ASG-managed instance and optionally verify with status checks before resuming ASG processes.
         
         Args:
             instance_id (str): Instance ID to start
+            verify (bool): Whether to verify instance state after starting
+            status_check_level (str): Level of status checks ('state', 'system', 'full')
             
         Returns:
             dict: Result of operation
@@ -382,6 +418,26 @@ class ASGOperations:
                 waiter = self.ec2_client.get_waiter('instance_running')
                 waiter.wait(InstanceIds=[instance_id], WaiterConfig={'Delay': 15, 'MaxAttempts': 40})
                 
+                # Perform verification if requested
+                verification_result = None
+                if verify:
+                    self.logger.info(f"Verifying ASG instance {instance_id} with {status_check_level} level checks")
+                    verification_result = self.verify_asg_instance_state(
+                        instance_id, 'running', status_check_level
+                    )
+                    
+                    if not verification_result['passed']:
+                        return {
+                            'InstanceId': instance_id,
+                            'ASGName': asg_name,
+                            'PreviousState': instance_info['PreviousState']['Name'],
+                            'CurrentState': instance_info['CurrentState']['Name'],
+                            'Status': 'Verification Failed',
+                            'Error': f"Verification failed: {verification_result['summary']}",
+                            'VerificationDetails': verification_result,
+                            'Timestamp': datetime.now().isoformat()
+                        }
+                
                 # Check if this is the last instance in the ASG to start
                 # If so, we can resume processes and clean up state
                 asg_response = self.asg_client.describe_auto_scaling_groups(
@@ -391,8 +447,9 @@ class ASGOperations:
                 if asg_response['AutoScalingGroups']:
                     asg_data = asg_response['AutoScalingGroups'][0]
                     
-                    # Check if all instances in ASG are running
+                    # Check if all instances in ASG are running (and verified if required)
                     all_running = True
+                    all_verified = True
                     for instance in asg_data.get('Instances', []):
                         # Get instance state
                         ec2_response = self.ec2_client.describe_instances(
@@ -403,11 +460,21 @@ class ASGOperations:
                                 if ec2_instance['State']['Name'] != 'running':
                                     all_running = False
                                     break
+                                    
+                                # If verification is required, verify all instances
+                                if verify and all_running:
+                                    inst_verification = self.verify_asg_instance_state(
+                                        instance['InstanceId'], 'running', status_check_level
+                                    )
+                                    if not inst_verification['passed']:
+                                        all_verified = False
+                                        self.logger.warning(f"Instance {instance['InstanceId']} verification failed: {inst_verification['summary']}")
                     
                     processes_resumed = False
                     state_cleaned = False
                     
-                    if all_running:
+                    # Only resume processes if all instances are running and verified (if required)
+                    if all_running and (not verify or all_verified):
                         # Resume ASG processes
                         resume_result = self.resume_asg_processes(asg_name)
                         processes_resumed = (resume_result['Status'] == 'Success')
@@ -416,8 +483,10 @@ class ASGOperations:
                         if processes_resumed:
                             cleanup_result = self.cleanup_asg_state(asg_name)
                             state_cleaned = (cleanup_result['Status'] == 'Success')
+                    elif verify and not all_verified:
+                        self.logger.warning(f"Not resuming ASG {asg_name} processes - some instances failed verification")
                     
-                    return {
+                    result = {
                         'InstanceId': instance_id,
                         'ASGName': asg_name,
                         'PreviousState': instance_info['PreviousState']['Name'],
@@ -428,8 +497,14 @@ class ASGOperations:
                         'AllInstancesRunning': all_running,
                         'Timestamp': datetime.now().isoformat()
                     }
+                    
+                    if verify:
+                        result['AllInstancesVerified'] = all_verified
+                        result['VerificationDetails'] = verification_result
+                    
+                    return result
                 else:
-                    return {
+                    result = {
                         'InstanceId': instance_id,
                         'ASGName': asg_name,
                         'PreviousState': instance_info['PreviousState']['Name'],
@@ -440,6 +515,11 @@ class ASGOperations:
                         'Error': 'Could not retrieve ASG details',
                         'Timestamp': datetime.now().isoformat()
                     }
+                    
+                    if verify:
+                        result['VerificationDetails'] = verification_result
+                    
+                    return result
                     
             except botocore.exceptions.ClientError as e:
                 return {
@@ -486,3 +566,198 @@ class ASGOperations:
         except botocore.exceptions.ClientError as e:
             self.logger.error(f"Error checking ASG state {asg_name}: {str(e)}")
             return False
+    
+    def verify_asg_instance_state(self, instance_id, expected_state, status_check_level='state', timeout=300, check_interval=10):
+        """Verify ASG-managed instance has reached the expected state with optional comprehensive status checks.
+        
+        This method provides the same verification levels as regular EC2 instances:
+        
+        1. 'state' (default): Basic instance state verification (running/stopped)
+        2. 'system': State + AWS system status checks (running instances only)
+        3. 'full': State + system + instance status + network reachability (running instances only)
+        
+        For stopped instances, all levels default to state-only verification since
+        AWS status checks are not applicable to stopped instances.
+        
+        Args:
+            instance_id (str): Instance ID to verify
+            expected_state (str): Expected instance state ('running' or 'stopped')
+            status_check_level (str): Verification depth - 'state', 'system', or 'full'
+            timeout (int): Maximum time to wait for verification in seconds (default: 300)
+            check_interval (int): Interval between verification attempts in seconds (default: 10)
+            
+        Returns:
+            dict: Verification result with detailed status information
+        """
+        self.logger.info(f"Verifying ASG instance {instance_id} with {status_check_level} level checks, expected state: {expected_state}")
+        
+        end_time = time.time() + timeout
+        while time.time() < end_time:
+            try:
+                # Get instance details
+                response = self.ec2_client.describe_instances(InstanceIds=[instance_id])
+                
+                if not response['Reservations']:
+                    return {
+                        'passed': False,
+                        'summary': 'Instance not found',
+                        'details': {'state_check': {'passed': False, 'value': 'not_found', 'expected': expected_state}}
+                    }
+                
+                instance = response['Reservations'][0]['Instances'][0]
+                current_state = instance['State']['Name']
+                
+                # Get status checks if needed
+                status_response = None
+                if status_check_level in ['system', 'full'] and expected_state == 'running':
+                    try:
+                        status_response = self.ec2_client.describe_instance_status(
+                            InstanceIds=[instance_id],
+                            IncludeAllInstances=True
+                        )
+                    except botocore.exceptions.ClientError as e:
+                        self.logger.warning(f"Could not get instance status for ASG instance {instance_id}: {str(e)}")
+                
+                # Perform comprehensive verification using same logic as regular EC2 instances
+                verification_result = self._verify_instance_comprehensive(
+                    instance, expected_state, status_check_level, status_response
+                )
+                
+                if verification_result['passed']:
+                    self.logger.info(f"ASG instance {instance_id} verification passed: {verification_result['summary']}")
+                    return verification_result
+                else:
+                    self.logger.debug(f"ASG instance {instance_id} verification pending: {verification_result['summary']}")
+                    
+                time.sleep(check_interval)
+                
+            except botocore.exceptions.ClientError as e:
+                self.logger.error(f"Error verifying ASG instance state {instance_id}: {str(e)}")
+                return {
+                    'passed': False,
+                    'summary': f'API Error: {str(e)}',
+                    'details': {'api_error': str(e)}
+                }
+        
+        # Timeout occurred
+        self.logger.warning(f"ASG instance {instance_id} did not pass {status_check_level} verification within timeout")
+        return {
+            'passed': False,
+            'summary': f'Timeout after {timeout}s',
+            'details': {'timeout': True, 'timeout_seconds': timeout}
+        }
+    
+    def _verify_instance_comprehensive(self, instance, expected_state, status_check_level, status_response):
+        """Perform comprehensive verification of an ASG instance based on the check level.
+        
+        Uses the same verification logic as regular EC2 instances for consistency.
+        
+        Args:
+            instance (dict): Instance data from describe_instances
+            expected_state (str): Expected instance state
+            status_check_level (str): Level of checks to perform
+            status_response (dict): Response from describe_instance_status
+            
+        Returns:
+            dict: Verification result with detailed status
+        """
+        instance_id = instance['InstanceId']
+        current_state = instance['State']['Name']
+        
+        result = {
+            'passed': False,
+            'summary': '',
+            'details': {
+                'state_check': {'passed': False, 'value': current_state, 'expected': expected_state},
+                'system_status': {'passed': None, 'value': None},
+                'instance_status': {'passed': None, 'value': None},
+                'reachability': {'passed': None, 'value': None}
+            }
+        }
+        
+        # Level 1: State check (always performed)
+        state_passed = current_state == expected_state
+        result['details']['state_check']['passed'] = state_passed
+        
+        if not state_passed:
+            result['summary'] = f"State: {current_state} (expected {expected_state})"
+            return result
+        
+        if status_check_level == 'state':
+            result['passed'] = True
+            result['summary'] = f"State: {current_state} ✓"
+            return result
+        
+        # Level 2: System status checks (for running instances)
+        if status_check_level in ['system', 'full'] and expected_state == 'running':
+            if status_response:
+                instance_status = None
+                for status in status_response.get('InstanceStatuses', []):
+                    if status['InstanceId'] == instance_id:
+                        instance_status = status
+                        break
+                
+                if instance_status:
+                    # System status check
+                    system_status = instance_status.get('SystemStatus', {}).get('Status', 'unknown')
+                    system_passed = system_status == 'ok'
+                    result['details']['system_status'] = {'passed': system_passed, 'value': system_status}
+                    
+                    if status_check_level == 'system':
+                        result['passed'] = system_passed
+                        result['summary'] = f"State: {current_state} ✓, System: {system_status} {'✓' if system_passed else '✗'}"
+                        return result
+                    
+                    # Level 3: Full checks (system + instance status + reachability)
+                    if status_check_level == 'full':
+                        # Instance status check
+                        instance_status_check = instance_status.get('InstanceStatus', {}).get('Status', 'unknown')
+                        instance_passed = instance_status_check == 'ok'
+                        result['details']['instance_status'] = {'passed': instance_passed, 'value': instance_status_check}
+                        
+                        # Reachability check
+                        reachability = instance_status.get('InstanceStatus', {}).get('Details', [])
+                        reachability_passed = True
+                        reachability_summary = 'ok'
+                        
+                        for detail in reachability:
+                            if detail.get('Name') == 'reachability' and detail.get('Status') != 'passed':
+                                reachability_passed = False
+                                reachability_summary = detail.get('Status', 'unknown')
+                                break
+                        
+                        result['details']['reachability'] = {'passed': reachability_passed, 'value': reachability_summary}
+                        
+                        # All checks must pass for full verification
+                        all_passed = system_passed and instance_passed and reachability_passed
+                        result['passed'] = all_passed
+                        
+                        status_indicators = [
+                            f"State: {current_state} ✓",
+                            f"System: {system_status} {'✓' if system_passed else '✗'}",
+                            f"Instance: {instance_status_check} {'✓' if instance_passed else '✗'}",
+                            f"Reachability: {reachability_summary} {'✓' if reachability_passed else '✗'}"
+                        ]
+                        result['summary'] = ', '.join(status_indicators)
+                        return result
+                else:
+                    # No status information available yet
+                    result['details']['system_status'] = {'passed': False, 'value': 'unavailable'}
+                    result['summary'] = f"State: {current_state} ✓, System status: unavailable"
+                    return result
+            else:
+                # Could not get status response
+                result['details']['system_status'] = {'passed': False, 'value': 'api_error'}
+                result['summary'] = f"State: {current_state} ✓, System status: API error"
+                return result
+        
+        # For stopped instances with system/full checks, only state matters
+        if expected_state == 'stopped':
+            result['passed'] = True
+            result['summary'] = f"State: {current_state} ✓ (stopped instances skip status checks)"
+            return result
+        
+        # Default fallback
+        result['passed'] = state_passed
+        result['summary'] = f"State: {current_state} {'✓' if state_passed else '✗'}"
+        return result
