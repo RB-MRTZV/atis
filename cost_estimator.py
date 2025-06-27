@@ -1,15 +1,36 @@
 #!/usr/bin/env python3
 import json
 import logging
+import os
 from datetime import datetime
 from collections import defaultdict
 import pandas as pd
+from aws_pricing_fetcher import AWSPricingFetcher
 
 logger = logging.getLogger(__name__)
 
 class CostEstimator:
-    def __init__(self, config_file='cost_config.json'):
-        self.config = self._load_config(config_file)
+    def __init__(self, region='ap-southeast-2', currency='AUD', config_file=None):
+        self.region = region
+        self.currency = currency
+        self.pricing_fetcher = AWSPricingFetcher(region=region, currency=currency)
+        
+        # Load legacy config if provided, otherwise use dynamic pricing
+        if config_file and os.path.exists(config_file):
+            self.config = self._load_config(config_file)
+            self.use_dynamic_pricing = False
+            logger.info(f"Using static pricing from {config_file}")
+        else:
+            self.config = {
+                'currency': currency,
+                'region': region,
+                'ec2_pricing': {},
+                'rds_pricing': {},
+                'eks_pricing': {'cluster_hour': 0.10}
+            }
+            self.use_dynamic_pricing = True
+            logger.info("Using dynamic AWS pricing API")
+        
         self.results = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
         self.detailed_results = []
     
@@ -32,7 +53,18 @@ class CostEstimator:
             
             hourly_cost = self.config['ec2_pricing'].get(instance_type, 0)
             if hourly_cost == 0:
-                logger.warning(f"No pricing found for EC2 instance type: {instance_type}")
+                if self.use_dynamic_pricing:
+                    # Try to fetch pricing for this specific instance type
+                    logger.info(f"Fetching missing pricing for EC2 instance type: {instance_type}")
+                    new_pricing = self.pricing_fetcher.fetch_ec2_pricing([instance_type])
+                    if instance_type in new_pricing:
+                        hourly_cost = new_pricing[instance_type]
+                        self.config['ec2_pricing'][instance_type] = hourly_cost
+                        logger.info(f"Found pricing for {instance_type}: ${hourly_cost:.4f} {self.currency}/hour")
+                    else:
+                        logger.warning(f"No pricing found for EC2 instance type: {instance_type}")
+                else:
+                    logger.warning(f"No pricing found for EC2 instance type: {instance_type}")
             
             daily_cost = hourly_cost * 24
             monthly_cost = daily_cost * 30
@@ -69,7 +101,18 @@ class CostEstimator:
             # Get base hourly cost
             hourly_cost = self.config['rds_pricing'].get(instance_class, 0)
             if hourly_cost == 0:
-                logger.warning(f"No pricing found for RDS instance class: {instance_class}")
+                if self.use_dynamic_pricing:
+                    # Try to fetch pricing for this specific instance class
+                    logger.info(f"Fetching missing pricing for RDS instance class: {instance_class}")
+                    new_pricing = self.pricing_fetcher.fetch_rds_pricing([instance_class])
+                    if instance_class in new_pricing:
+                        hourly_cost = new_pricing[instance_class]
+                        self.config['rds_pricing'][instance_class] = hourly_cost
+                        logger.info(f"Found pricing for {instance_class}: ${hourly_cost:.4f} {self.currency}/hour")
+                    else:
+                        logger.warning(f"No pricing found for RDS instance class: {instance_class}")
+                else:
+                    logger.warning(f"No pricing found for RDS instance class: {instance_class}")
             
             # Double cost for Multi-AZ deployments
             if multi_az:
@@ -109,7 +152,18 @@ class CostEstimator:
             # EKS nodes use EC2 pricing
             hourly_cost = self.config['ec2_pricing'].get(instance_type, 0)
             if hourly_cost == 0:
-                logger.warning(f"No pricing found for EKS node type: {instance_type}")
+                if self.use_dynamic_pricing:
+                    # Try to fetch pricing for this specific instance type
+                    logger.info(f"Fetching missing pricing for EKS node type: {instance_type}")
+                    new_pricing = self.pricing_fetcher.fetch_ec2_pricing([instance_type])
+                    if instance_type in new_pricing:
+                        hourly_cost = new_pricing[instance_type]
+                        self.config['ec2_pricing'][instance_type] = hourly_cost
+                        logger.info(f"Found pricing for {instance_type}: ${hourly_cost:.4f} {self.currency}/hour")
+                    else:
+                        logger.warning(f"No pricing found for EKS node type: {instance_type}")
+                else:
+                    logger.warning(f"No pricing found for EKS node type: {instance_type}")
             
             daily_cost = hourly_cost * 24
             monthly_cost = daily_cost * 30
@@ -143,6 +197,15 @@ class CostEstimator:
         self.results = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
         self.detailed_results = []
         
+        # Fetch dynamic pricing if needed
+        if self.use_dynamic_pricing:
+            logger.info("Fetching current AWS pricing data...")
+            dynamic_pricing = self.pricing_fetcher.fetch_pricing_for_resources(scan_results)
+            
+            # Update config with fetched pricing
+            self.config.update(dynamic_pricing)
+            logger.info(f"Updated pricing data: {len(self.config['ec2_pricing'])} EC2 types, {len(self.config['rds_pricing'])} RDS types")
+        
         # Estimate costs for each service
         self.estimate_ec2_cost(scan_results.get('ec2_instances', []))
         self.estimate_rds_cost(scan_results.get('rds_instances', []))
@@ -155,7 +218,8 @@ class CostEstimator:
             'scan_time': scan_results.get('scan_time'),
             'estimation_time': datetime.utcnow().isoformat(),
             'currency': self.config['currency'],
-            'config_last_updated': self.config.get('last_updated')
+            'config_last_updated': self.config.get('last_updated'),
+            'pricing_method': 'dynamic_api' if self.use_dynamic_pricing else 'static_config'
         }
         
         logger.info("Cost estimation complete")
@@ -196,8 +260,8 @@ if __name__ == "__main__":
     with open('aws_scan_results.json', 'r') as f:
         scan_results = json.load(f)
     
-    # Estimate costs
-    estimator = CostEstimator()
+    # Estimate costs using dynamic pricing
+    estimator = CostEstimator(region='ap-southeast-2', currency='AUD')
     results, detailed_results = estimator.estimate_all_costs(scan_results)
     
     # Save results

@@ -33,7 +33,7 @@ class AWSCostAnalyzer:
         
         # Initialize components
         self.scanner = AWSResourceScanner(region=region)
-        self.estimator = CostEstimator()
+        self.estimator = CostEstimator(region=region, currency='AUD')
         
         # Ensure output directories exist
         self.ensure_directories()
