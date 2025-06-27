@@ -51,17 +51,25 @@ def parse_args():
     
     parser.add_argument('--action', choices=['start', 'stop'], required=True,
                         help='Action to perform on instances')
+    parser.add_argument('--target', choices=['ec2', 'asg', 'both'], default='both',
+                        help='Target resources: ec2 (regular instances), asg (ASG-managed), or both')
     parser.add_argument('--region', help='AWS region (defaults to config)')
-    parser.add_argument('--accounts', help='Comma-separated list of accounts to process')
-    parser.add_argument('--dry-run', action='store_true', help='Simulate actions without executing')
-    parser.add_argument('--verify', action='store_true', help='Verify instance states after operation')
+    parser.add_argument('--dry-run', action='store_true', help='Show what instances would be affected without executing actions')
+    parser.add_argument('--verify', action='store_true', help='Verify instance states after operation (use with --status-checks)')
+    parser.add_argument('--status-checks', choices=['state', 'system', 'full'], default='state',
+                        help='Level of status checks when --verify is used: '
+                             'state (instance state only - default), '
+                             'system (state + AWS system status checks), '
+                             'full (state + system + instance status + network reachability). '
+                             'System and full checks only apply to running instances. '
+                             'Stopped instances skip status checks and only verify state.')
     parser.add_argument('--notify-only', action='store_true', help='Send notification without performing actions')
     parser.add_argument('--force', action='store_true', help='Force stop instances (only applies to stop action)')
     
     return parser.parse_args()
 
-def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg_tag_value, action, args, account, region, reporter):
-    """Process EC2 instances for an account, handling ASG-managed instances appropriately.
+def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg_tag_value, action, args, region, reporter):
+    """Process EC2 instances, handling ASG-managed instances appropriately.
     
     Args:
         ec2_ops: EC2Operations instance
@@ -72,7 +80,6 @@ def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg
         asg_tag_value: Tag value to identify ASG-managed instances
         action: Action to perform (start/stop)
         args: Command line arguments
-        account: Account information
         region: AWS region
         reporter: Reporter instance
         
@@ -80,24 +87,63 @@ def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg
         int: Number of instances processed
     """
     logger = logging.getLogger(__name__)
-    account_name = account['name']
     
     # Find instances with the specified tag, identifying ASG-managed ones
     tagged_instances = ec2_ops.find_tagged_instances(tag_key, tag_value, asg_tag_key, asg_tag_value)
     
     if not tagged_instances:
-        logger.info(f"No tagged EC2 instances found in account {account_name}")
+        logger.info("No tagged EC2 instances found")
         return 0
         
     # Separate regular instances from ASG-managed instances
     regular_instances = [i for i in tagged_instances if not i['IsASGManaged']]
     asg_managed_instances = [i for i in tagged_instances if i['IsASGManaged']]
     
-    logger.info(f"Found {len(tagged_instances)} tagged instances in account {account_name}: "
-                f"{len(regular_instances)} regular, {len(asg_managed_instances)} ASG-managed")
+    # Filter based on target parameter
+    if args.target == 'ec2':
+        asg_managed_instances = []
+    elif args.target == 'asg':
+        regular_instances = []
+    
+    filtered_instances = regular_instances + asg_managed_instances
+    
+    logger.info(f"Found {len(tagged_instances)} tagged instances: "
+                f"{len(regular_instances)} regular, {len(asg_managed_instances)} ASG-managed "
+                f"(target: {args.target})")
+    
+    # Handle dry-run mode
+    if args.dry_run:
+        logger.info(f"DRY RUN mode - Displaying instances that would be affected")
+        dry_run_summary = ec2_ops.display_dry_run_summary(filtered_instances, action)
+        
+        # Add dry-run entries to reporter for artifact generation
+        for instance in filtered_instances:
+            resource_type = 'EC2-ASG' if instance['IsASGManaged'] else 'EC2'
+            environment_info = f"Environment: {instance.get('Environment', 'Unknown')}"
+            if instance['IsASGManaged']:
+                environment_info += ", ASG-managed"
+            
+            expected_state = 'running' if action == 'start' else 'stopped'
+            would_change = instance['State'] != expected_state
+            
+            reporter.add_result(
+                resource_type=resource_type,
+                account='current',
+                region=region,
+                resource_id=instance['InstanceId'],
+                resource_name=instance['Name'],
+                previous_state=instance['State'],
+                new_state=expected_state,
+                action=action,
+                timestamp=datetime.now().isoformat(),
+                status='Would Change' if would_change else 'No Change Needed',
+                details=environment_info
+            )
+        
+        return len(filtered_instances)
     
     # Execute the requested action
-    if not args.notify_only and not args.dry_run:
+    if not args.notify_only:
         
         # Process regular EC2 instances
         if regular_instances:
@@ -119,7 +165,7 @@ def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg
                 
                 reporter.add_result(
                     resource_type='EC2',
-                    account=account_name,
+                    account='current',
                     region=region,
                     resource_id=instance_id,
                     resource_name=instance_name,
@@ -140,7 +186,7 @@ def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg
                 
                 reporter.add_result(
                     resource_type='EC2',
-                    account=account_name,
+                    account='current',
                     region=region,
                     resource_id=instance_id,
                     resource_name=instance_name,
@@ -155,25 +201,46 @@ def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg
                 
             # Verify regular instance states if requested
             if args.verify:
-                logger.info(f"Verifying regular EC2 instance states in account {account_name}")
+                logger.info(f"Verifying regular EC2 instance states with {args.status_checks} level checks")
                 
                 # Only verify instances that were successfully started/stopped
                 instances_to_verify = [{'InstanceId': i['InstanceId']} for i in results['succeeded']]
-                verify_results = ec2_ops.verify_instance_states(instances_to_verify, expected_state)
+                verify_results = ec2_ops.verify_instance_states(
+                    instances_to_verify, 
+                    expected_state, 
+                    status_check_level=args.status_checks
+                )
                 
-                # Update report with verification results
+                # Update report with verification results (successful verifications)
+                for instance in verify_results['verified']:
+                    instance_id = instance['InstanceId']
+                    status_details = instance.get('StatusDetails', {})
+                    
+                    # Find and update the existing result with verification details
+                    for result in reporter.results:
+                        if (result['ResourceId'] == instance_id and 
+                            result['Account'] == 'current' and 
+                            result['ResourceType'] == 'EC2' and
+                            result['Status'] == 'Success'):
+                            
+                            result['Details'] += f", Verification: {status_details.get('summary', 'passed')}"
+                            break
+                
+                # Update report with verification failures
                 for instance in verify_results['failed']:
                     instance_id = instance['InstanceId']
+                    status_details = instance.get('StatusDetails', {})
+                    error_msg = instance.get('Error', 'Verification failed')
                     
                     # Find and update the existing result
                     for result in reporter.results:
                         if (result['ResourceId'] == instance_id and 
-                            result['Account'] == account_name and 
+                            result['Account'] == 'current' and 
                             result['ResourceType'] == 'EC2' and
                             result['Status'] == 'Success'):
                             
-                            result['Status'] = 'Failed'
-                            result['Error'] = instance.get('Error', 'Verification failed')
+                            result['Status'] = 'Verification Failed'
+                            result['Error'] = f"{error_msg} - {status_details.get('summary', '')}"
                             result['Timestamp'] = instance['Timestamp']
                             break
         
@@ -196,7 +263,7 @@ def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg
                     
                     reporter.add_result(
                         resource_type='EC2',
-                        account=account_name,
+                        account='current',
                         region=region,
                         resource_id=instance_id,
                         resource_name=instance_name,
@@ -213,7 +280,7 @@ def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg
                     logger.error(f"Error processing ASG-managed instance {instance_id}: {str(e)}")
                     reporter.add_result(
                         resource_type='EC2-ASG',
-                        account=account_name,
+                        account='current',
                         region=region,
                         resource_id=instance_id,
                         resource_name=instance_name,
@@ -225,12 +292,12 @@ def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg
                         error=str(e)
                     )
     else:
-        # Dry run or notify only mode
-        logger.info(f"Dry run or notify only mode, would {action} "
-                    f"{len(tagged_instances)} instances in account {account_name}")
+        # Notify only mode (dry-run is handled above)
+        logger.info(f"Notify only mode, would {action} "
+                    f"{len(filtered_instances)} instances")
         
-        # Add entries for dry run
-        for instance in tagged_instances:
+        # Add entries for notify-only mode
+        for instance in filtered_instances:
             resource_type = 'EC2-ASG' if instance['IsASGManaged'] else 'EC2'
             environment_info = f"Environment: {instance.get('Environment', 'Unknown')}"
             if instance['IsASGManaged']:
@@ -238,19 +305,19 @@ def process_ec2_instances(ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg
             
             reporter.add_result(
                 resource_type=resource_type,
-                account=account_name,
+                account='current',
                 region=region,
                 resource_id=instance['InstanceId'],
                 resource_name=instance['Name'],
                 previous_state=instance['State'],
-                new_state='[DRY RUN]',
+                new_state='[NOTIFY ONLY]',
                 action=action,
                 timestamp=datetime.now().isoformat(),
-                status='Simulated',
+                status='Notification',
                 details=environment_info
             )
     
-    return len(tagged_instances)
+    return len(filtered_instances)
 
 def main():
     """Main entry point."""
@@ -269,11 +336,6 @@ def main():
         region = config_manager.get_region(args.region)
         logger.info(f"Using AWS region: {region}")
         
-        # Get accounts to process
-        account_names = args.accounts.split(',') if args.accounts else None
-        accounts = config_manager.get_accounts(account_names)
-        logger.info(f"Processing {len(accounts)} accounts")
-        
         # Get tag configuration
         tag_key, tag_value = config_manager.get_tag_config()
         logger.info(f"Using tag filter: {tag_key}:{tag_value}")
@@ -285,33 +347,26 @@ def main():
         # Initialize reporter
         reporter = Reporter()
         
-        # Process each account
-        for account in accounts:
-            account_name = account['name']
-            account_id = account['account_id']
-            
-            logger.info(f"Processing account: {account_name} ({account_id})")
-            
-            try:
-                # Initialize operations
-                ec2_ops = EC2Operations(region)
-                asg_ops = ASGOperations(region)
-                
-                # Process instances (both regular and ASG-managed)
-                total_processed = process_ec2_instances(
-                    ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg_tag_value,
-                    args.action, args, account, region, reporter
-                )
-                
-                logger.info(f"Processed {total_processed} instances in account {account_name}")
-                
-            except Exception as e:
-                logger.error(f"Error processing account {account_name}: {str(e)}")
-                continue
+        # Initialize operations
+        ec2_ops = EC2Operations(region)
+        asg_ops = ASGOperations(region)
+        
+        # Process instances (both regular and ASG-managed)
+        total_processed = process_ec2_instances(
+            ec2_ops, asg_ops, tag_key, tag_value, asg_tag_key, asg_tag_value,
+            args.action, args, region, reporter
+        )
+        
+        logger.info(f"Processed {total_processed} instances")
                 
         # Generate reports
         if reporter.results:
             logger.info("Generating reports")
+            
+            # Generate specific dry-run artifact if in dry-run mode
+            if args.dry_run:
+                dry_run_artifact = reporter.generate_dry_run_artifact()
+                logger.info(f"Dry-run artifact generated: {dry_run_artifact}")
             
             csv_report = reporter.generate_csv_report()
             json_report = reporter.generate_json_report()

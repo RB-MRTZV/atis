@@ -1,0 +1,3 @@
+ResourceType,Account,Region,ResourceId,Name,PreviousState,NewState,Action,Timestamp,Status,Error,Details
+EC2,current,ap-southeast-2,i-004f01a439f80ab66,VPN-Test,running,running,start,2025-06-27T00:13:32.283841,Success,,"Environment: VPN-Test, Verification: State: running ✓"
+EC2,current,ap-southeast-2,i-0509dcd40a6d931ab,PR,running,running,start,2025-06-27T00:13:32.283937,Success,,"Environment: , Verification: State: running ✓"

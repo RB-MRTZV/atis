@@ -1,0 +1,3 @@
+ResourceType,Account,Region,ResourceId,Name,PreviousState,NewState,Action,Timestamp,Status,Error,Details
+EC2,example,ap-southeast-2,i-0509dcd40a6d931ab,PR,running,stopping,stop,2025-06-26T23:48:40.269744,Success,,"Environment: , Verification: State: stopped ✓"
+EC2,example,ap-southeast-2,i-004f01a439f80ab66,VPN-Test,running,stopping,stop,2025-06-26T23:48:40.269838,Success,,"Environment: VPN-Test, Verification: State: stopped ✓"

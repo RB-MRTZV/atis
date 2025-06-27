@@ -1,6 +1,5 @@
 # src/config_manager.py
 import os
-import json
 import configparser
 import logging
 from pathlib import Path
@@ -12,20 +11,16 @@ class ConfigurationError(Exception):
 class ConfigManager:
     """Manages configuration for the EC2 scheduler."""
     
-    def __init__(self, config_file="ec2-scheduler/config/config.ini", accounts_file="ec2-scheduler/config/accounts.json"):
+    def __init__(self, config_file="ec2-scheduler/config/config.ini"):
         """Initialize the configuration manager.
         
         Args:
             config_file (str): Path to the config.ini file
-            accounts_file (str): Path to the accounts.json file
         """
         self.logger = logging.getLogger(__name__)
         self.config_file = config_file
-        self.accounts_file = accounts_file
         self.config = None
-        self.accounts = []
         self.load_config()
-        self.load_accounts()
         
     def load_config(self):
         """Load configuration from config file."""
@@ -41,6 +36,8 @@ class ConfigManager:
                     'default_region': 'ap-southeast-2',
                     'tag_key': 'scheduled',
                     'tag_value': 'enabled',
+                    'asg_tag_key': 'asg-managed',
+                    'asg_tag_value': 'enabled',
                     'sns_topic_arn': os.environ.get('SNS_TOPIC_ARN', '')
                 }
                 
@@ -58,64 +55,6 @@ class ConfigManager:
             self.logger.error(f"Failed to load configuration: {str(e)}")
             raise ConfigurationError(f"Failed to load configuration: {str(e)}")
             
-    def load_accounts(self):
-        """Load accounts from accounts file or environment."""
-        try:
-            # First check if accounts are provided in environment
-            accounts_env = os.environ.get('AWS_ACCOUNTS')
-            if accounts_env:
-                try:
-                    self.accounts = json.loads(accounts_env)
-                    self.logger.info(f"Loaded {len(self.accounts)} accounts from environment")
-                    return
-                except json.JSONDecodeError:
-                    self.logger.warning("Failed to parse AWS_ACCOUNTS environment variable, falling back to file")
-            
-            # Check if accounts file exists, if not create with placeholder
-            if not Path(self.accounts_file).exists():
-                self.logger.warning(f"Accounts file {self.accounts_file} not found, creating placeholder")
-                os.makedirs(os.path.dirname(self.accounts_file), exist_ok=True)
-                
-                placeholder_accounts = {
-                    "accounts": [
-                        {
-                            "name": "example",
-                            "account_id": "123456789012"
-                        }
-                    ]
-                }
-                
-                with open(self.accounts_file, 'w') as f:
-                    json.dump(placeholder_accounts, f, indent=2)
-                    
-                self.accounts = placeholder_accounts['accounts']
-            else:
-                with open(self.accounts_file, 'r') as f:
-                    self.accounts = json.load(f).get('accounts', [])
-                    
-            self.logger.info(f"Loaded {len(self.accounts)} accounts from file")
-                
-        except Exception as e:
-            self.logger.error(f"Failed to load accounts: {str(e)}")
-            raise ConfigurationError(f"Failed to load accounts: {str(e)}")
-            
-    def get_accounts(self, account_names=None):
-        """Get accounts to process.
-        
-        Args:
-            account_names (list): Optional list of account names to filter by
-            
-        Returns:
-            list: List of account dictionaries
-        """
-        if not account_names:
-            return self.accounts
-            
-        filtered_accounts = [acc for acc in self.accounts if acc['name'] in account_names]
-        if not filtered_accounts:
-            self.logger.warning(f"No accounts found matching {account_names}")
-        return filtered_accounts
-        
     def get_region(self, region=None):
         """Get the AWS region to use.
         
@@ -144,6 +83,16 @@ class ConfigManager:
         tag_key = self.config.get('DEFAULT', 'tag_key', fallback='scheduled')
         tag_value = self.config.get('DEFAULT', 'tag_value', fallback='enabled')
         return tag_key, tag_value
+    
+    def get_asg_tag_config(self):
+        """Get the ASG tag configuration.
+        
+        Returns:
+            tuple: (asg_tag_key, asg_tag_value)
+        """
+        asg_tag_key = self.config.get('DEFAULT', 'asg_tag_key', fallback='asg-managed')
+        asg_tag_value = self.config.get('DEFAULT', 'asg_tag_value', fallback='enabled')
+        return asg_tag_key, asg_tag_value
         
     def get_sns_topic_arn(self):
         """Get the SNS topic ARN.

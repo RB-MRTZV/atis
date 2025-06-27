@@ -1,0 +1,37 @@
+====================================================================================================
+DRY RUN ARTIFACT - AWS EC2 Instance Scheduler
+Generated: 2025-06-27 00:13:13 UTC
+====================================================================================================
+
+SUMMARY:
+  Total instances found: 2
+  Instances that would change state: 2
+  Instances already in target state: 0
+
+LEGEND:
+  ✓ = Instance state would change
+  ⚠ = Instance already in target state (no change needed)
+  📦 = ASG-managed instance (requires ASG operations)
+
+INSTANCES THAT WOULD CHANGE STATE:
+--------------------------------------------------------------------------------
+Status Instance ID          Name                      Current    Target     Type       Env          Account     
+--------------------------------------------------------------------------------------------------------------
+✓      i-004f01a439f80ab66  VPN-Test                  running    stopped    EC2        VPN-Test     current     
+✓      i-0509dcd40a6d931ab  PR                        running    stopped    EC2                     current     
+
+RESOURCE TYPE BREAKDOWN:
+----------------------------------------
+  EC2: 2 total (2 would change)
+
+STATE TRANSITION BREAKDOWN:
+----------------------------------------
+  running → stopped: 2 instances
+
+NEXT STEPS:
+- Review the instances that would change state
+- Run without --dry-run to execute the operations
+- Use --target parameter to filter EC2 or ASG instances
+- Check GitLab CI artifacts for detailed reports
+
+====================================================================================================

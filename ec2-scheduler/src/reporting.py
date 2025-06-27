@@ -159,6 +159,152 @@ class Reporter:
             self.logger.error(f"Failed to generate table report: {str(e)}")
             raise ReportingError(f"Failed to generate table report: {str(e)}")
             
+    def generate_dry_run_artifact(self):
+        """Generate a detailed dry-run artifact file for GitLab CI.
+        
+        Returns:
+            str: Path to the generated dry-run artifact file
+        """
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{self.reports_dir}/dry-run-summary_{timestamp}.txt"
+            
+            # Separate instances by status
+            would_change = [r for r in self.results if r['Status'] == 'Would Change']
+            no_change = [r for r in self.results if r['Status'] == 'No Change Needed']
+            
+            # Create detailed summary
+            summary_lines = [
+                "=" * 100,
+                f"DRY RUN ARTIFACT - AWS EC2 Instance Scheduler",
+                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}",
+                "=" * 100,
+                "",
+                f"SUMMARY:",
+                f"  Total instances found: {len(self.results)}",
+                f"  Instances that would change state: {len(would_change)}",
+                f"  Instances already in target state: {len(no_change)}",
+                "",
+                "LEGEND:",
+                "  ✓ = Instance state would change",
+                "  ⚠ = Instance already in target state (no change needed)",
+                "  📦 = ASG-managed instance (requires ASG operations)",
+                "",
+            ]
+            
+            if would_change:
+                summary_lines.extend([
+                    "INSTANCES THAT WOULD CHANGE STATE:",
+                    "-" * 80
+                ])
+                
+                # Header
+                summary_lines.append(
+                    f"{'Status':<6} {'Instance ID':<20} {'Name':<25} {'Current':<10} {'Target':<10} {'Type':<10} {'Env':<12} {'Account':<12}"
+                )
+                summary_lines.append("-" * 110)
+                
+                for result in would_change:
+                    status_icon = "📦" if result['ResourceType'] == 'EC2-ASG' else "✓"
+                    env = result['Details'].split('Environment: ')[1].split(',')[0] if 'Environment: ' in result['Details'] else 'Unknown'
+                    
+                    summary_lines.append(
+                        f"{status_icon:<6} {result['ResourceId']:<20} {result['Name'][:24]:<25} "
+                        f"{result['PreviousState']:<10} {result['NewState']:<10} "
+                        f"{result['ResourceType']:<10} {env[:11]:<12} {result['Account']:<12}"
+                    )
+                
+                summary_lines.append("")
+            
+            if no_change:
+                summary_lines.extend([
+                    "INSTANCES ALREADY IN TARGET STATE:",
+                    "-" * 80
+                ])
+                
+                # Header
+                summary_lines.append(
+                    f"{'Status':<6} {'Instance ID':<20} {'Name':<25} {'Current':<10} {'Target':<10} {'Type':<10} {'Env':<12} {'Account':<12}"
+                )
+                summary_lines.append("-" * 110)
+                
+                for result in no_change:
+                    status_icon = "📦" if result['ResourceType'] == 'EC2-ASG' else "⚠"
+                    env = result['Details'].split('Environment: ')[1].split(',')[0] if 'Environment: ' in result['Details'] else 'Unknown'
+                    
+                    summary_lines.append(
+                        f"{status_icon:<6} {result['ResourceId']:<20} {result['Name'][:24]:<25} "
+                        f"{result['PreviousState']:<10} {result['NewState']:<10} "
+                        f"{result['ResourceType']:<10} {env[:11]:<12} {result['Account']:<12}"
+                    )
+                
+                summary_lines.append("")
+            
+            # Add resource type breakdown
+            resource_counts = {}
+            state_change_counts = {}
+            
+            for result in self.results:
+                # Count by resource type
+                rt = result['ResourceType']
+                resource_counts[rt] = resource_counts.get(rt, 0) + 1
+                
+                # Count by state change
+                key = f"{result['PreviousState']} → {result['NewState']}"
+                state_change_counts[key] = state_change_counts.get(key, 0) + 1
+            
+            summary_lines.extend([
+                "RESOURCE TYPE BREAKDOWN:",
+                "-" * 40
+            ])
+            
+            for resource_type, count in resource_counts.items():
+                changing_count = len([r for r in self.results if r['ResourceType'] == resource_type and r['Status'] == 'Would Change'])
+                summary_lines.append(f"  {resource_type}: {count} total ({changing_count} would change)")
+            
+            summary_lines.extend([
+                "",
+                "STATE TRANSITION BREAKDOWN:",
+                "-" * 40
+            ])
+            
+            for transition, count in state_change_counts.items():
+                summary_lines.append(f"  {transition}: {count} instances")
+            
+            summary_lines.extend([
+                "",
+                "NEXT STEPS:",
+                "- Review the instances that would change state",
+                "- Run without --dry-run to execute the operations",
+                "- Use --target parameter to filter EC2 or ASG instances",
+                "- Check GitLab CI artifacts for detailed reports",
+                "",
+                "=" * 100
+            ])
+            
+            # Write to file
+            with open(filename, 'w', encoding='utf-8') as txtfile:
+                txtfile.write('\n'.join(summary_lines))
+            
+            self.logger.info(f"Dry-run artifact generated: {filename}")
+            
+            # Also write a short summary to console log file for GitLab CI
+            console_summary = [
+                "",
+                "🔍 DRY RUN COMPLETED",
+                f"📊 {len(self.results)} instances found, {len(would_change)} would change state",
+                f"📁 Detailed report: {filename}",
+                ""
+            ]
+            
+            print('\n'.join(console_summary))
+            
+            return filename
+            
+        except Exception as e:
+            self.logger.error(f"Failed to generate dry-run artifact: {str(e)}")
+            raise ReportingError(f"Failed to generate dry-run artifact: {str(e)}")
+
     def generate_summary(self):
         """Generate a summary of the results.
         

@@ -1,6 +1,16 @@
 # AWS Instance Scheduler
 
-A comprehensive multi-service AWS resource scheduler for cost optimization and automated resource management. Supports EC2 instances, EKS clusters, RDS instances, and Aurora PostgreSQL clusters with sophisticated state management, phased execution, and comprehensive dry-run capabilities.
+A comprehensive multi-service AWS resource scheduler for cost optimization and automated resource management. Supports EC2 instances, EKS clusters, RDS instances, and Aurora PostgreSQL clusters with sophisticated state management, phased execution, comprehensive dry-run capabilities, and advanced verification systems.
+
+## 🚀 Latest Updates (v1.4)
+
+### EC2 Scheduler Enhanced Features (Single Account)
+- **🏢 Single Account Operation**: Simplified to operate on current AWS account only (no multi-account complexity)
+- **🔍 Real AWS Dry-Run**: Queries live AWS data to show exactly which instances would be affected
+- **✅ Advanced Verification**: Three levels of health checks (state, system, full) with AWS status integration  
+- **🎯 Target Filtering**: Granular control over EC2-only, ASG-only, or both instance types
+- **📊 Enhanced Reporting**: GitLab CI optimized artifacts with visual status indicators
+- **🔧 Comprehensive Status Checks**: System status, instance status, and network reachability validation
 
 ## 🏗️ Project Structure
 
@@ -96,6 +106,66 @@ instance-scheduler/
 - ✅ **Consistent architecture** with standardized config management and SNS notifications
 - ✅ **Robust error handling** with failure notifications and recovery mechanisms
 - ✅ **Environment variable support** for flexible deployment configurations
+
+## 🚀 Quick Start Guide
+
+### EC2 Scheduler - Enhanced Features (v1.4 - Single Account)
+
+#### Enhanced Dry-Run (Real AWS Discovery)
+```bash
+# See exactly which instances would be affected in current account (real AWS data)
+python ec2-scheduler/src/main.py --action stop --dry-run --region ap-southeast-2
+
+# Target specific instance types in current account
+python ec2-scheduler/src/main.py --action start --target ec2 --dry-run --region ap-southeast-2     # Only regular EC2
+python ec2-scheduler/src/main.py --action stop --target asg --dry-run --region ap-southeast-2      # Only ASG-managed
+python ec2-scheduler/src/main.py --action stop --target both --dry-run --region ap-southeast-2     # Both types (default)
+```
+
+#### Advanced Verification Levels
+```bash
+# Basic state verification (default - backward compatible)
+python ec2-scheduler/src/main.py --action start --verify --region ap-southeast-2
+
+# System-level health checks (state + AWS system status)
+python ec2-scheduler/src/main.py --action start --verify --status-checks system --region ap-southeast-2
+
+# Full health verification (state + system + instance + reachability)
+python ec2-scheduler/src/main.py --action start --verify --status-checks full --region ap-southeast-2
+```
+
+#### Complete Operation Examples
+```bash
+# Stop EC2 instances with system verification in current account
+python ec2-scheduler/src/main.py --action stop --target ec2 --verify --status-checks system --region ap-southeast-2
+
+# Start all instances with full health verification  
+python ec2-scheduler/src/main.py --action start --target both --verify --status-checks full --region ap-southeast-2
+
+# Dry-run with verification level (shows verification logic without executing)
+python ec2-scheduler/src/main.py --action start --dry-run --verify --status-checks full --region ap-southeast-2
+```
+
+### EKS Scheduler
+```bash
+# Enhanced dry-run with pod eviction simulation
+python eks-scheduler/src/main.py --action stop --cluster production-cluster --dry-run
+
+# Scale cluster with bootstrap validation
+python eks-scheduler/src/main.py --action start --cluster production-cluster --min-nodes 2
+```
+
+### RDS Scheduler  
+```bash
+# Aurora PostgreSQL clusters only
+python rds-scheduler/src/main.py --action stop --target clusters --verify
+
+# Standalone RDS instances only
+python rds-scheduler/src/main.py --action start --target instances --verify
+
+# Both Aurora and RDS with verification
+python rds-scheduler/src/main.py --action stop --target both --verify
+```
 
 ## 🚀 GitLab CI Pipeline Architecture
 

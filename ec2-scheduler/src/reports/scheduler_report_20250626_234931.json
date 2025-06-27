@@ -1,0 +1,33 @@
+{
+  "timestamp": "2025-06-26T23:49:31.186912",
+  "results": [
+    {
+      "ResourceType": "EC2",
+      "Account": "example",
+      "Region": "ap-southeast-2",
+      "ResourceId": "i-0509dcd40a6d931ab",
+      "Name": "PR",
+      "PreviousState": "running",
+      "NewState": "stopping",
+      "Action": "stop",
+      "Timestamp": "2025-06-26T23:48:40.269744",
+      "Status": "Success",
+      "Error": "",
+      "Details": "Environment: , Verification: State: stopped \u2713"
+    },
+    {
+      "ResourceType": "EC2",
+      "Account": "example",
+      "Region": "ap-southeast-2",
+      "ResourceId": "i-004f01a439f80ab66",
+      "Name": "VPN-Test",
+      "PreviousState": "running",
+      "NewState": "stopping",
+      "Action": "stop",
+      "Timestamp": "2025-06-26T23:48:40.269838",
+      "Status": "Success",
+      "Error": "",
+      "Details": "Environment: VPN-Test, Verification: State: stopped \u2713"
+    }
+  ]
+}

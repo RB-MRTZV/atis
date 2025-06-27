@@ -21,7 +21,8 @@ Each scheduler follows identical patterns:
 - `src/reporting.py` - Report generation (CSV/JSON/table)
 - `src/sns_notifier.py` - SNS notifications
 - `config/config.ini` - Service configuration
-- `config/accounts.json` - Account definitions
+
+**Note**: EC2 scheduler operates on single AWS account (current credentials), while EKS and RDS schedulers support multi-account via `config/accounts.json`
 
 ## Common Development Commands
 
@@ -32,27 +33,38 @@ cd ec2-scheduler/tests && python -m pytest
 cd eks-scheduler/tests && python -m pytest
 cd rds-scheduler/tests && python -m pytest
 
-# Dry-run testing (always run before real operations)
+# Enhanced Dry-run testing (always run before real operations)
+# EC2 scheduler - shows real instances that would be affected
 python ec2-scheduler/src/main.py --action stop --target both --dry-run
+python ec2-scheduler/src/main.py --action start --target ec2 --dry-run  # Only regular EC2 instances
+python ec2-scheduler/src/main.py --action stop --target asg --dry-run   # Only ASG-managed instances
+
+# EKS scheduler dry-run
 python eks-scheduler/src/main.py --action stop --cluster production-cluster --dry-run --region ap-southeast-2
+python eks-scheduler/src/main.py --action start --cluster production-cluster --min-nodes 2 --dry-run  # Tests bootstrap validation
+
+# RDS scheduler dry-run
 python rds-scheduler/src/main.py --action stop --target both --dry-run --region ap-southeast-2
 
-# Test EKS enhanced features
-python eks-scheduler/src/main.py --action stop --cluster production-cluster --dry-run  # Tests pod eviction
-python eks-scheduler/src/main.py --action start --cluster production-cluster --min-nodes 2 --dry-run  # Tests bootstrap validation
+# Enhanced verification testing (different levels of health checks)
+python ec2-scheduler/src/main.py --action start --verify --status-checks state    # Basic state verification
+python ec2-scheduler/src/main.py --action start --verify --status-checks system   # State + system status
+python ec2-scheduler/src/main.py --action start --verify --status-checks full     # Full AWS status checks
 ```
 
 ### Running Individual Services
 ```bash
-# EC2 scheduler
+# EC2 scheduler - Single account, enhanced features
 cd ec2-scheduler/src
-python main.py --action stop --target both --verify
+python main.py --action stop --target both --verify --status-checks system --region ap-southeast-2
+python main.py --action start --target ec2 --verify --status-checks full --region ap-southeast-2
+python main.py --action stop --dry-run --region ap-southeast-2  # See what would be affected without executing
 
-# EKS scheduler  
+# EKS scheduler - Multi-account support
 cd eks-scheduler/src
 python main.py --action stop --cluster production-cluster --region ap-southeast-2
 
-# RDS scheduler
+# RDS scheduler - Multi-account support
 cd rds-scheduler/src
 python main.py --action stop --target both --verify --region ap-southeast-2
 ```
@@ -64,6 +76,46 @@ pip install boto3 tabulate pytest awscli
 ```
 
 ## Key Technical Details
+
+### EC2 Scheduler Enhanced Features (NEW v1.4)
+The EC2 scheduler now includes advanced verification and targeting capabilities with **single-account operation**:
+
+#### Single Account Operation
+- **Simplified Architecture**: Operates on current AWS account credentials only
+- **No Account Configuration**: No need for accounts.json or multi-account setup
+- **Region-Based**: Uses AWS credentials from environment, IAM role, or AWS CLI profile
+- **Direct Operations**: All EC2/ASG operations target the authenticated account
+
+#### Enhanced Dry-Run Mode
+- **Real AWS Discovery**: Queries AWS to find actual instances with specified tags
+- **Detailed Console Output**: Shows current vs expected states with visual indicators
+- **State Change Analysis**: Identifies which instances would change vs already in target state
+- **GitLab CI Friendly**: Console output visible in pipeline logs
+- **Comprehensive Artifacts**: Generates detailed reports for CI artifacts
+
+#### Advanced Verification Levels
+- **`--status-checks state`**: Basic instance state verification (running/stopped) - Default
+- **`--status-checks system`**: State + AWS system status checks (hypervisor-level)
+- **`--status-checks full`**: State + system + instance status + network reachability
+- **Smart Logic**: System/full checks only apply to running instances; stopped instances skip status checks
+
+#### Target Filtering
+- **`--target ec2`**: Only regular EC2 instances
+- **`--target asg`**: Only Auto Scaling Group managed instances  
+- **`--target both`**: Both types (default)
+
+#### Enhanced Reporting
+- **Multiple Formats**: CSV, JSON, HTML, and specialized dry-run artifacts
+- **Verification Details**: Status check results included in all reports
+- **Visual Indicators**: Clear pass/fail status with detailed breakdowns
+- **GitLab Integration**: Artifacts optimized for CI/CD workflows
+
+```bash
+# Examples of enhanced features (single account)
+python main.py --action stop --dry-run --target ec2 --region ap-southeast-2           # See what EC2 instances would be affected
+python main.py --action start --verify --status-checks full --region ap-southeast-2   # Full health verification after start
+python main.py --action stop --target asg --verify --region ap-southeast-2            # Only ASG instances with verification
+```
 
 ### EKS Scheduler State Management
 - Uses JSON files in `eks-scheduler/state/` for persistence
@@ -111,11 +163,32 @@ The EKS scheduler includes sophisticated safety and management features:
 - Extensive artifact preservation for EKS state files
 
 ### Dry-Run Capabilities
-All schedulers support comprehensive dry-run mode:
-- No AWS API calls made during dry-run
-- Mock data simulation with realistic scenarios
-- Clear `[DRY RUN]` indicators in logs
-- Full report generation
+All schedulers support comprehensive dry-run mode with enhanced features:
+
+#### EC2 Scheduler (Enhanced v1.4)
+- **Real AWS Discovery**: Makes actual AWS API calls to find tagged instances
+- **Live State Analysis**: Shows current instance states vs expected states after operation
+- **Visual Console Output**: Clear indicators for what would change vs no change needed
+- **Detailed Artifacts**: Generates specialized dry-run reports for GitLab CI
+- **Target Filtering**: Supports EC2-only, ASG-only, or both instance types
+- **GitLab Integration**: Console output optimized for pipeline visibility
+
+#### EKS/RDS Schedulers
+- **Mock Simulation**: No AWS API calls made during dry-run
+- **Realistic Scenarios**: Simulates operations with mock data
+- **Clear Indicators**: `[DRY RUN]` markers in all logs
+- **Report Generation**: Full reports with simulated results
+
+```bash
+# EC2 Enhanced Dry-Run Examples
+python ec2-scheduler/src/main.py --action stop --dry-run                    # Real discovery + analysis
+python ec2-scheduler/src/main.py --action start --target ec2 --dry-run      # EC2 instances only
+python ec2-scheduler/src/main.py --action stop --target asg --dry-run       # ASG instances only
+
+# Traditional Mock Dry-Run (EKS/RDS)
+python eks-scheduler/src/main.py --action stop --cluster prod --dry-run     # Mock simulation
+python rds-scheduler/src/main.py --action stop --target both --dry-run      # Mock simulation
+```
 
 ### Error Handling Patterns
 All schedulers use consistent error handling:
@@ -176,6 +249,18 @@ All schedulers use consistent error handling:
 - All schedulers support multi-account operations
 - GitLab CI pipeline includes AWS credentials (hardcoded for this environment)
 - State files are critical for EKS operations - ensure artifacts are preserved
+
+## Documentation Update Process
+
+**CRITICAL**: After every code change, documentation MUST be updated. Follow the process in `DOCUMENTATION_UPDATE_PROCESS.md`:
+
+1. **Code Documentation**: Update function docstrings and inline comments
+2. **CLAUDE.md**: Update testing examples and feature descriptions  
+3. **README.md**: Update Quick Start Guide and feature lists for user-facing changes
+4. **Config Files**: Add comments for new configuration options
+5. **Help Text**: Update command line argument descriptions
+
+**Before every commit**: Test all documentation examples and verify help text accuracy.
 
 ## Common Issues
 
